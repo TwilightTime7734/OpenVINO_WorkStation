@@ -1,0 +1,24 @@
+# Build outputs
+bin/
+obj/
+_buildcheck/
+_publish/
+
+# Visual Studio per-user project state
+.vs/
+*.csproj.user
+*.suo
+*.user
+*.rsuser
+
+# Local machine settings
+workbench.cfg
+model-root.txt
+
+# Local OpenVINO source/reference checkout
+Extras/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.cache

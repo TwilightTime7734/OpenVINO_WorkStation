@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>WorkStationC_</RootNamespace>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="OpenVINO.CSharp.API\**\*.cs" />
+    <Compile Remove="Extras\**\*.cs" />
+    <Compile Remove="_buildcheck\**\*.cs" />
+    <EmbeddedResource Remove="OpenVINO.CSharp.API\**\*" />
+    <EmbeddedResource Remove="Extras\**\*" />
+    <EmbeddedResource Remove="_buildcheck\**\*" />
+    <None Remove="OpenVINO.CSharp.API\**\*" />
+    <None Remove="Extras\**\*" />
+    <None Remove="_buildcheck\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="OpenVINO.CSharp.API\OpenVINO.CSharp.API.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Form1.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Form1.Designer.cs">
+      <DependentUpon>Form1.cs</DependentUpon>
+      <SubType>Designer</SubType>
+    </Compile>
+    <EmbeddedResource Update="Form1.resx">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Samples\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('Runtime\OpenVINO\win-x64\native')">
+    <Content Include="Runtime\OpenVINO\win-x64\native\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>runtimes\win-x64\native\%(Filename)%(Extension)</TargetPath>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('Runtime\optimum-exporter')">
+    <None Remove="Runtime\optimum-exporter\**\*" />
+    <Content Include="Runtime\optimum-exporter\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
+
