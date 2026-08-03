@@ -229,7 +229,7 @@ C:\Example\OpenVINO\ovms.exe --pull ^
 - The configured main model folder must contain model folders only. Do not create app-owned root helper folders such as `downloads`, `direct`, `local`, `converted`, `compiled-cache`, or `results` inside the main model folder.
 - Downloads, including direct web-file downloads, must use `MainModelFolder\<model-name>\main\...`.
 - App bookkeeping such as `workbench.cfg` and local-model index files belongs beside the app/project, not inside the main model folder.
-- Benchmark, chart, and image test results are not saved to disk by default. Do not recreate a `results` folder unless the user explicitly asks for saved reports.
+- Image test results are not saved to disk by default. Do not recreate a `results` folder unless the user explicitly asks for saved reports.
 - The Convert tab is the only app-owned place that should create/export new OpenVINO compiled `.blob` files.
 - Workstation and Tests may import and run existing compiled `.blob` files, but they must not auto-create compiled-cache blobs.
 - Keep compiled blobs with the specific model they belong to; do not create new root-level blob cache folders.

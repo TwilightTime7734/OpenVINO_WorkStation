@@ -118,32 +118,6 @@ namespace WorkStationC_
             pnlIrVisualizer = new Panel();
             lblIrPlaceholder = new Label();
             lblModelsStatus = new Label();
-            tabBenchmark = new TabPage();
-            benchmarkLayout = new TableLayoutPanel();
-            lblBenchIterations = new Label();
-            numBenchIterations = new NumericUpDown();
-            lblBenchIterationsHelp = new Label();
-            lblBenchWarmup = new Label();
-            numBenchWarmup = new NumericUpDown();
-            lblBenchWarmupHelp = new Label();
-            lblBenchRuns = new Label();
-            numBenchRuns = new NumericUpDown();
-            lblBenchRunsHelp = new Label();
-            lblPerformanceHint = new Label();
-            cboPerformanceHint = new ComboBox();
-            btnRunGenericBenchmark = new Button();
-            tabVisualization = new TabPage();
-            visualizationLayout = new TableLayoutPanel();
-            lblVizCsv = new Label();
-            txtVizCsv = new TextBox();
-            btnBrowseVizCsv = new Button();
-            lblVizMetric = new Label();
-            cboVizMetric = new ComboBox();
-            vizButtons = new FlowLayoutPanel();
-            btnRenderChart = new Button();
-            lblVizStatus = new Label();
-            pnlChart = new Panel();
-            lblChartPlaceholder = new Label();
             tabTests = new TabPage();
             testsLayout = new TableLayoutPanel();
             lblTestsHeading = new Label();
@@ -249,15 +223,6 @@ namespace WorkStationC_
             convertLayout.SuspendLayout();
             grpConvertOutputs.SuspendLayout();
             pnlIrVisualizer.SuspendLayout();
-            tabBenchmark.SuspendLayout();
-            benchmarkLayout.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)numBenchIterations).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numBenchWarmup).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numBenchRuns).BeginInit();
-            tabVisualization.SuspendLayout();
-            visualizationLayout.SuspendLayout();
-            vizButtons.SuspendLayout();
-            pnlChart.SuspendLayout();
             tabTests.SuspendLayout();
             testsLayout.SuspendLayout();
             imageTestButtons.SuspendLayout();
@@ -307,7 +272,7 @@ namespace WorkStationC_
             lblSubtitle.Name = "lblSubtitle";
             lblSubtitle.Size = new Size(514, 15);
             lblSubtitle.TabIndex = 1;
-            lblSubtitle.Text = "Tabbed runner for device checks, inference, benchmarks, visualization, and model management.";
+            lblSubtitle.Text = "Tabbed runner for device checks, model tests, conversion, downloads, and local server checks.";
             // 
             // mainSplit
             // 
@@ -337,8 +302,6 @@ namespace WorkStationC_
             tabMain.Controls.Add(tabDownloads);
             tabMain.Controls.Add(tabConvert);
             tabMain.Controls.Add(tabOvmsPull);
-            tabMain.Controls.Add(tabBenchmark);
-            tabMain.Controls.Add(tabVisualization);
             tabMain.Controls.Add(tabTests);
             tabMain.Controls.Add(tabServerTests);
             tabMain.Dock = DockStyle.Fill;
@@ -1386,297 +1349,6 @@ namespace WorkStationC_
             lblModelsStatus.TabIndex = 30;
             lblModelsStatus.Text = "Select an OpenVINO IR model from the model root and create a device blob.";
             // 
-            // tabBenchmark
-            // 
-            tabBenchmark.Controls.Add(benchmarkLayout);
-            tabBenchmark.Location = new Point(4, 32);
-            tabBenchmark.Name = "tabBenchmark";
-            tabBenchmark.Padding = new Padding(12);
-            tabBenchmark.Size = new Size(1063, 322);
-            tabBenchmark.TabIndex = 2;
-            tabBenchmark.Text = "Benchmark";
-            // 
-            // benchmarkLayout
-            // 
-            benchmarkLayout.ColumnCount = 3;
-            benchmarkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175F));
-            benchmarkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            benchmarkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 450F));
-            benchmarkLayout.Controls.Add(lblBenchIterations, 0, 0);
-            benchmarkLayout.Controls.Add(numBenchIterations, 1, 0);
-            benchmarkLayout.Controls.Add(lblBenchIterationsHelp, 2, 0);
-            benchmarkLayout.Controls.Add(lblBenchWarmup, 0, 1);
-            benchmarkLayout.Controls.Add(numBenchWarmup, 1, 1);
-            benchmarkLayout.Controls.Add(lblBenchWarmupHelp, 2, 1);
-            benchmarkLayout.Controls.Add(lblBenchRuns, 0, 2);
-            benchmarkLayout.Controls.Add(numBenchRuns, 1, 2);
-            benchmarkLayout.Controls.Add(lblBenchRunsHelp, 2, 2);
-            benchmarkLayout.Controls.Add(lblPerformanceHint, 0, 3);
-            benchmarkLayout.Controls.Add(cboPerformanceHint, 1, 3);
-            benchmarkLayout.Controls.Add(btnRunGenericBenchmark, 2, 3);
-            benchmarkLayout.Dock = DockStyle.Fill;
-            benchmarkLayout.Location = new Point(12, 12);
-            benchmarkLayout.Name = "benchmarkLayout";
-            benchmarkLayout.RowCount = 4;
-            benchmarkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            benchmarkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            benchmarkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            benchmarkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            benchmarkLayout.Size = new Size(1039, 298);
-            benchmarkLayout.TabIndex = 0;
-            // 
-            // lblBenchIterations
-            // 
-            lblBenchIterations.AutoSize = true;
-            lblBenchIterations.Location = new Point(3, 0);
-            lblBenchIterations.Name = "lblBenchIterations";
-            lblBenchIterations.Size = new Size(67, 19);
-            lblBenchIterations.TabIndex = 5;
-            lblBenchIterations.Text = "Iterations";
-            // 
-            // numBenchIterations
-            // 
-            numBenchIterations.Location = new Point(178, 3);
-            numBenchIterations.Name = "numBenchIterations";
-            numBenchIterations.Size = new Size(75, 25);
-            numBenchIterations.TabIndex = 6;
-            // 
-            // lblBenchIterationsHelp
-            // 
-            lblBenchIterationsHelp.Anchor = AnchorStyles.Left;
-            lblBenchIterationsHelp.AutoSize = true;
-            lblBenchIterationsHelp.ForeColor = SystemColors.GrayText;
-            lblBenchIterationsHelp.Location = new Point(592, 9);
-            lblBenchIterationsHelp.Name = "lblBenchIterationsHelp";
-            lblBenchIterationsHelp.Size = new Size(283, 19);
-            lblBenchIterationsHelp.TabIndex = 7;
-            lblBenchIterationsHelp.Text = "Timed inferences performed during each run.";
-            // 
-            // lblBenchWarmup
-            // 
-            lblBenchWarmup.AutoSize = true;
-            lblBenchWarmup.Location = new Point(3, 38);
-            lblBenchWarmup.Name = "lblBenchWarmup";
-            lblBenchWarmup.Size = new Size(61, 19);
-            lblBenchWarmup.TabIndex = 7;
-            lblBenchWarmup.Text = "Warmup";
-            // 
-            // numBenchWarmup
-            // 
-            numBenchWarmup.Location = new Point(178, 41);
-            numBenchWarmup.Name = "numBenchWarmup";
-            numBenchWarmup.Size = new Size(75, 25);
-            numBenchWarmup.TabIndex = 8;
-            // 
-            // lblBenchWarmupHelp
-            // 
-            lblBenchWarmupHelp.Anchor = AnchorStyles.Left;
-            lblBenchWarmupHelp.AutoSize = true;
-            lblBenchWarmupHelp.ForeColor = SystemColors.GrayText;
-            lblBenchWarmupHelp.Location = new Point(592, 47);
-            lblBenchWarmupHelp.Name = "lblBenchWarmupHelp";
-            lblBenchWarmupHelp.Size = new Size(367, 19);
-            lblBenchWarmupHelp.TabIndex = 9;
-            lblBenchWarmupHelp.Text = "Untimed inferences used to stabilize the model and device.";
-            // 
-            // lblBenchRuns
-            // 
-            lblBenchRuns.AutoSize = true;
-            lblBenchRuns.Location = new Point(3, 76);
-            lblBenchRuns.Name = "lblBenchRuns";
-            lblBenchRuns.Size = new Size(39, 19);
-            lblBenchRuns.TabIndex = 9;
-            lblBenchRuns.Text = "Runs";
-            // 
-            // numBenchRuns
-            // 
-            numBenchRuns.Location = new Point(178, 79);
-            numBenchRuns.Name = "numBenchRuns";
-            numBenchRuns.Size = new Size(75, 25);
-            numBenchRuns.TabIndex = 10;
-            // 
-            // lblBenchRunsHelp
-            // 
-            lblBenchRunsHelp.Anchor = AnchorStyles.Left;
-            lblBenchRunsHelp.AutoSize = true;
-            lblBenchRunsHelp.ForeColor = SystemColors.GrayText;
-            lblBenchRunsHelp.Location = new Point(592, 85);
-            lblBenchRunsHelp.Name = "lblBenchRunsHelp";
-            lblBenchRunsHelp.Size = new Size(132, 19);
-            lblBenchRunsHelp.TabIndex = 11;
-            lblBenchRunsHelp.Text = "= Iterations × Runs.";
-            // 
-            // lblPerformanceHint
-            // 
-            lblPerformanceHint.AutoSize = true;
-            lblPerformanceHint.Location = new Point(3, 114);
-            lblPerformanceHint.Name = "lblPerformanceHint";
-            lblPerformanceHint.Size = new Size(113, 19);
-            lblPerformanceHint.TabIndex = 11;
-            lblPerformanceHint.Text = "Performance hint";
-            // 
-            // cboPerformanceHint
-            // 
-            cboPerformanceHint.Dock = DockStyle.Fill;
-            cboPerformanceHint.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboPerformanceHint.Items.AddRange(new object[] { "LATENCY", "THROUGHPUT", "CUMULATIVE_THROUGHPUT" });
-            cboPerformanceHint.Location = new Point(178, 117);
-            cboPerformanceHint.Name = "cboPerformanceHint";
-            cboPerformanceHint.Size = new Size(408, 25);
-            cboPerformanceHint.TabIndex = 12;
-            cboPerformanceHint.SelectedIndexChanged += cboPerformanceHint_SelectedIndexChanged;
-            // 
-            // btnRunGenericBenchmark
-            // 
-            btnRunGenericBenchmark.AutoSize = true;
-            btnRunGenericBenchmark.Dock = DockStyle.Top;
-            btnRunGenericBenchmark.Location = new Point(592, 117);
-            btnRunGenericBenchmark.Name = "btnRunGenericBenchmark";
-            btnRunGenericBenchmark.Padding = new Padding(8, 3, 8, 3);
-            btnRunGenericBenchmark.Size = new Size(444, 35);
-            btnRunGenericBenchmark.TabIndex = 13;
-            btnRunGenericBenchmark.Text = "Run Generic Benchmark";
-            btnRunGenericBenchmark.Click += btnRunGenericBenchmark_Click;
-            // 
-            // tabVisualization
-            // 
-            tabVisualization.Controls.Add(visualizationLayout);
-            tabVisualization.Location = new Point(4, 32);
-            tabVisualization.Name = "tabVisualization";
-            tabVisualization.Padding = new Padding(12);
-            tabVisualization.Size = new Size(1063, 322);
-            tabVisualization.TabIndex = 3;
-            tabVisualization.Text = "Visualization";
-            // 
-            // visualizationLayout
-            // 
-            visualizationLayout.ColumnCount = 3;
-            visualizationLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175F));
-            visualizationLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            visualizationLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105F));
-            visualizationLayout.Controls.Add(lblVizCsv, 0, 0);
-            visualizationLayout.Controls.Add(txtVizCsv, 1, 0);
-            visualizationLayout.Controls.Add(btnBrowseVizCsv, 2, 0);
-            visualizationLayout.Controls.Add(lblVizMetric, 0, 1);
-            visualizationLayout.Controls.Add(cboVizMetric, 1, 1);
-            visualizationLayout.Controls.Add(vizButtons, 1, 2);
-            visualizationLayout.Controls.Add(lblVizStatus, 0, 3);
-            visualizationLayout.Controls.Add(pnlChart, 0, 4);
-            visualizationLayout.Dock = DockStyle.Fill;
-            visualizationLayout.Location = new Point(12, 12);
-            visualizationLayout.Name = "visualizationLayout";
-            visualizationLayout.RowCount = 10;
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            visualizationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            visualizationLayout.Size = new Size(1039, 298);
-            visualizationLayout.TabIndex = 0;
-            // 
-            // lblVizCsv
-            // 
-            lblVizCsv.AutoSize = true;
-            lblVizCsv.Location = new Point(3, 0);
-            lblVizCsv.Name = "lblVizCsv";
-            lblVizCsv.Size = new Size(55, 19);
-            lblVizCsv.TabIndex = 0;
-            lblVizCsv.Text = "CSV file";
-            // 
-            // txtVizCsv
-            // 
-            txtVizCsv.Dock = DockStyle.Fill;
-            txtVizCsv.Location = new Point(178, 3);
-            txtVizCsv.Name = "txtVizCsv";
-            txtVizCsv.Size = new Size(753, 25);
-            txtVizCsv.TabIndex = 1;
-            // 
-            // btnBrowseVizCsv
-            // 
-            btnBrowseVizCsv.AutoSize = true;
-            btnBrowseVizCsv.Location = new Point(937, 3);
-            btnBrowseVizCsv.Name = "btnBrowseVizCsv";
-            btnBrowseVizCsv.Size = new Size(99, 32);
-            btnBrowseVizCsv.TabIndex = 2;
-            btnBrowseVizCsv.Text = "Browse...";
-            btnBrowseVizCsv.Click += btnBrowseVizCsv_Click;
-            // 
-            // lblVizMetric
-            // 
-            lblVizMetric.AutoSize = true;
-            lblVizMetric.Location = new Point(3, 38);
-            lblVizMetric.Name = "lblVizMetric";
-            lblVizMetric.Size = new Size(48, 19);
-            lblVizMetric.TabIndex = 3;
-            lblVizMetric.Text = "Metric";
-            // 
-            // cboVizMetric
-            // 
-            cboVizMetric.Dock = DockStyle.Fill;
-            cboVizMetric.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboVizMetric.Items.AddRange(new object[] { "throughput", "avg_ms", "median_ms", "p95_ms", "compile_ms", "first_infer_ms" });
-            cboVizMetric.Location = new Point(178, 41);
-            cboVizMetric.Name = "cboVizMetric";
-            cboVizMetric.Size = new Size(753, 25);
-            cboVizMetric.TabIndex = 4;
-            cboVizMetric.SelectedIndexChanged += cboVizMetric_SelectedIndexChanged;
-            // 
-            // vizButtons
-            // 
-            vizButtons.Controls.Add(btnRenderChart);
-            vizButtons.Dock = DockStyle.Fill;
-            vizButtons.Location = new Point(178, 79);
-            vizButtons.Name = "vizButtons";
-            vizButtons.Size = new Size(753, 42);
-            vizButtons.TabIndex = 5;
-            // 
-            // btnRenderChart
-            // 
-            btnRenderChart.Location = new Point(3, 3);
-            btnRenderChart.Name = "btnRenderChart";
-            btnRenderChart.Size = new Size(135, 36);
-            btnRenderChart.TabIndex = 0;
-            btnRenderChart.Text = "Render Chart";
-            btnRenderChart.Click += btnRenderChart_Click;
-            // 
-            // lblVizStatus
-            // 
-            lblVizStatus.AutoSize = true;
-            visualizationLayout.SetColumnSpan(lblVizStatus, 3);
-            lblVizStatus.ForeColor = SystemColors.GrayText;
-            lblVizStatus.Location = new Point(3, 124);
-            lblVizStatus.Name = "lblVizStatus";
-            lblVizStatus.Size = new Size(286, 19);
-            lblVizStatus.TabIndex = 6;
-            lblVizStatus.Text = "Load a benchmark CSV and render by metric.";
-            // 
-            // pnlChart
-            // 
-            pnlChart.BackColor = Color.White;
-            pnlChart.BorderStyle = BorderStyle.FixedSingle;
-            visualizationLayout.SetColumnSpan(pnlChart, 3);
-            pnlChart.Controls.Add(lblChartPlaceholder);
-            pnlChart.Dock = DockStyle.Fill;
-            pnlChart.Location = new Point(3, 161);
-            pnlChart.Name = "pnlChart";
-            pnlChart.Size = new Size(1033, 34);
-            pnlChart.TabIndex = 7;
-            // 
-            // lblChartPlaceholder
-            // 
-            lblChartPlaceholder.AutoSize = true;
-            lblChartPlaceholder.ForeColor = SystemColors.GrayText;
-            lblChartPlaceholder.Location = new Point(20, 20);
-            lblChartPlaceholder.Name = "lblChartPlaceholder";
-            lblChartPlaceholder.Size = new Size(213, 19);
-            lblChartPlaceholder.TabIndex = 0;
-            lblChartPlaceholder.Text = "Benchmark chart will render here.";
-            // 
             // tabTests
             // 
             tabTests.Controls.Add(testsLayout);
@@ -2315,7 +1987,7 @@ namespace WorkStationC_
             lblOutputInfo.Name = "lblOutputInfo";
             lblOutputInfo.Size = new Size(1053, 24);
             lblOutputInfo.TabIndex = 0;
-            lblOutputInfo.Text = "Messages, help, errors, download status, model details, and benchmark results appear here.";
+            lblOutputInfo.Text = "Messages, help, errors, download status, and model details appear here.";
             lblOutputInfo.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // txtOutput
@@ -2624,18 +2296,6 @@ namespace WorkStationC_
             grpConvertOutputs.ResumeLayout(false);
             pnlIrVisualizer.ResumeLayout(false);
             pnlIrVisualizer.PerformLayout();
-            tabBenchmark.ResumeLayout(false);
-            benchmarkLayout.ResumeLayout(false);
-            benchmarkLayout.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)numBenchIterations).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numBenchWarmup).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numBenchRuns).EndInit();
-            tabVisualization.ResumeLayout(false);
-            visualizationLayout.ResumeLayout(false);
-            visualizationLayout.PerformLayout();
-            vizButtons.ResumeLayout(false);
-            pnlChart.ResumeLayout(false);
-            pnlChart.PerformLayout();
             tabTests.ResumeLayout(false);
             testsLayout.ResumeLayout(false);
             testsLayout.PerformLayout();
@@ -2687,7 +2347,7 @@ namespace WorkStationC_
 
         private TableLayoutPanel mainLayout; private Label lblTitle; private Label lblSubtitle; private SplitContainer mainSplit; private TabControl tabMain;
         private TabPage tabWorkstation; private TableLayoutPanel workstationLayout; private Label lblWorkstationHeading; private TableLayoutPanel modelRootLayout; private Label lblModelRoot; private TextBox txtModelRoot; private Button btnBrowseModelRoot; private Button btnCheckWorkstation; private Label lblWorkstationTarget; private ComboBox cboWorkstationTarget; private Label lblWorkstationMultiTarget; private ComboBox cboWorkstationMultiTarget; private Label lblModelCapabilities; private TextBox txtModelCapabilities;
-private Label lblInferModel; private TextBox txtInferModel; private Button btnBrowseInferModel; private Button btnUseSampleModel; private Label lblInferImage; private TextBox txtInferImage; private FlowLayoutPanel imageTestButtons; private Button btnBrowseInferImage; private Button btnRunImageTest; private Label lblInferText; private TextBox txtInferText; private Button btnBrowseInferLabels; private Label lblInferLabels; private TextBox txtInferLabels; private Label lblInferPreset; private ComboBox cboInferPreset;         private TabPage tabBenchmark; private TableLayoutPanel benchmarkLayout; private Label lblBenchIterations; private NumericUpDown numBenchIterations; private Label lblBenchIterationsHelp; private Label lblBenchWarmup; private NumericUpDown numBenchWarmup; private Label lblBenchWarmupHelp; private Label lblBenchRuns; private NumericUpDown numBenchRuns; private Label lblBenchRunsHelp; private Label lblPerformanceHint; private ComboBox cboPerformanceHint; private Button btnRunGenericBenchmark;         private TabPage tabVisualization; private TableLayoutPanel visualizationLayout; private Label lblVizCsv; private TextBox txtVizCsv; private Button btnBrowseVizCsv; private Label lblVizMetric; private ComboBox cboVizMetric; private FlowLayoutPanel vizButtons; private Button btnRenderChart; private Label lblVizStatus; private Panel pnlChart; private Label lblChartPlaceholder;
+private Label lblInferModel; private TextBox txtInferModel; private Button btnBrowseInferModel; private Button btnUseSampleModel; private Label lblInferImage; private TextBox txtInferImage; private FlowLayoutPanel imageTestButtons; private Button btnBrowseInferImage; private Button btnRunImageTest; private Label lblInferText; private TextBox txtInferText; private Button btnBrowseInferLabels; private Label lblInferLabels; private TextBox txtInferLabels; private Label lblInferPreset; private ComboBox cboInferPreset;
         private TabPage tabDownloads; private Panel modelsScroll; private Panel modelsLayout; private TabPage tabConvert; private Panel convertLayout; private Button btnDeleteDownload; private Label lblModelWebsites; private ComboBox cboModelWebsites; private Button btnOpenModelWebsite; private Button btnAddModelWebsite; private Button btnDeleteModelWebsite; private Label lblHfQuery; private TextBox txtHfQuery; private Button btnSearchRepos; private Button btnSearchAllModels; private Button btnPresetHuggingFace; private Button btnPresetOpenVino; private Button btnPresetIntel; private Button btnPresetUltralytics; private Button btnPresetOllama; private Button btnOfficialFiles; private Button btnRefreshOfficialIndex; private ListView lstHfRepos; private ColumnHeader colModelId; private ColumnHeader colDownloads; private ColumnHeader colLikes; private ColumnHeader colModelSource; private ColumnHeader colTask; private ColumnHeader colLibrary; private ColumnHeader colQuantization; private Button btnLoadFiles; private Button btnClearFileSelection; private Button btnDownloadHelp; private Label lblRepoId; private TextBox txtRepoId; private Label lblRevision; private TextBox txtRevision; private Label lblDownloadUrl; private TextBox txtDownloadUrl; private Button btnCopyDownloadUrl; private ListView lstHfFiles; private ColumnHeader colFilePath; private ColumnHeader colFileType; private ColumnHeader colFileExtension; private ColumnHeader colFileSize; private ColumnHeader colFileNotes; private ProgressBar progressDownload; private Label lblDownloadStatus; private Button btnCancelDownload; private Label modelsSeparator2; private Label lblOmzBuilderHeading; private ComboBox cboConvertSourceModel; private Button btnRefreshConvertModels; private GroupBox grpConvertOutputs; private CheckBox chkConvertBlob; private Button btnConvertToIr; private Panel pnlIrVisualizer; private Label lblIrPlaceholder; private Label lblModelsStatus;
         private TabPage tabOvmsPull; private Panel ovmsPullLayout; private Label lblOvmsPullHeading; private Label lblOvmsExecutable; private TextBox txtOvmsExecutable; private Label lblOvmsPythonPath; private TextBox txtOvmsPythonPath; private Label lblOvmsExportToolsPath; private TextBox txtOvmsExportToolsPath; private Label lblOvmsSourceFormat; private ComboBox cboOvmsSourceFormat; private Label lblOvmsTask; private ComboBox cboOvmsTask; private Label lblOvmsPipelineType; private ComboBox cboOvmsPipelineType; private Label lblOvmsWeightFormat; private ComboBox cboOvmsWeightFormat; private Label lblOvmsSourceModel; private ComboBox cboOvmsSourceModel; private Label lblOvmsGgufFilename; private TextBox txtOvmsGgufFilename; private Label lblOvmsModelRepository; private TextBox txtOvmsModelRepository; private Label lblOvmsLogPath; private TextBox txtOvmsLogPath; private CheckBox chkOvmsOverwrite; private CheckBox chkOvmsDebug; private Button btnCheckOvmsVersions; private Button btnPreviewOvmsPull; private Button btnRunOvmsPull; private Label lblOvmsPullStatus;
         private TabPage tabTests; private TableLayoutPanel testsLayout; private Label lblTestsHeading; private Label lblTestModelPath; private TextBox txtTestModelPath; private Button btnInspectOpenVinoModel; private Button btnRunOpenVinoModelTest; private Label lblTestsNote; private Label lblImageResult; private PictureBox picImageResult; private TabPage tabServerTests; private TableLayoutPanel serverTestsLayout; private TextBox txtServerEndpointList; private Label lblServerNoInputHeading; private Label lblServerUserInputHeading; private Label lblTestEndpoint; private TextBox txtTestEndpoint; private Button btnTestEndpoint; private Label lblModelsEndpoint; private TextBox txtModelsEndpoint; private Button btnTestModelsEndpoint; private Label lblTestApiKey; private TextBox txtTestApiKey; private Label lblChatEndpoint; private TextBox txtChatEndpoint; private Label lblTextEndpoint; private TextBox txtTextEndpoint; private Button btnTestTextEndpoint; private Label lblImageEndpoint; private TextBox txtImageEndpoint; private Button btnTestImageEndpoint; private Label lblChatModel; private ComboBox cboServerModel; private Label lblChatPrompt; private TextBox txtChatPrompt; private Button btnTestChat; private Button btnShowServerSettings; private Label lblOpenVinoRuntimeHeading; private Label lblLocalServerUrl; private TextBox txtLocalServerUrl; private Button btnStartLocalServer; private Label lblLocalServerStatus; private TextBox txtLocalServerStatus; private Button btnStopLocalServer;

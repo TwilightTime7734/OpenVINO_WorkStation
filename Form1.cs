@@ -178,14 +178,11 @@ namespace WorkStationC_
 
             lblTitle.ForeColor = text;
             lblSubtitle.ForeColor = mutedText;
-            lblVizStatus.ForeColor = mutedText;
-            lblChartPlaceholder.ForeColor = mutedText;
             lblIrPlaceholder.ForeColor = mutedText;
             lblModelsStatus.ForeColor = mutedText;
             lblOvmsPullStatus.ForeColor = mutedText;
             lblDownloadStatus.ForeColor = mutedText;
 
-            pnlChart.BackColor = inputBack;
             pnlIrVisualizer.BackColor = inputBack;
             txtOutput.BackColor = Color.FromArgb(18, 18, 18);
             txtOutput.ForeColor = Color.FromArgb(220, 220, 220);
@@ -394,10 +391,6 @@ namespace WorkStationC_
             RefreshSelectedRuntimeModelState(out _);
             InitializeImageDropZone();
             UpdateMultiTargetControlState();
-            if (cboPerformanceHint.SelectedIndex < 0 && cboPerformanceHint.Items.Count > 0)
-            {
-                cboPerformanceHint.SelectedIndex = 0;
-            }
         }
 
         private void btnClearOutput_Click(object? sender, EventArgs e) => txtOutput.Clear();
@@ -1273,54 +1266,12 @@ namespace WorkStationC_
                     "The main model folder should contain model folders only. Each model folder keeps its files under main.",
                     "Check Workstation: scans Windows, CPU, memory, graphics adapters, and OpenVINO.",
                     "Runtime target: choose the OpenVINO target that all other tabs should use.",
-                    "Model: choose the shared model folder used by model testing, Benchmark, Convert load, and Tests.",
+                    "Model: choose the shared model folder used by model testing, Convert, and Tests.",
                     "Model can use: after a successful load, this summarizes whether text or image input was detected.",
                     "Image, Test Text, Labels, and Model Preset are on Tests and use the loaded Workstation model.",
                     "Compile to Target -> Run loads the selected model and runs the matching local model path.",
                     "Common target names are GPU.0, GPU.1, GPU.2, and MULTI. CPU appears only when no GPU target is available.",
-                    "If GPU does not appear here, benchmark and inference GPU runs will not work yet.",
-                };
-            }
-
-            if (selectedTab == tabBenchmark)
-            {
-                return new[]
-                {
-                    "Benchmark tests speed. It does not tell you whether the model answer is correct.",
-                    "Benchmark always uses the model file selected on Workstation; there is no separate Benchmark model selection.",
-                    "For IR .xml files, keep the matching .bin weights file beside it.",
-                    "Runtime target is selected on Workstation and reused here.",
-                    "Use one GPU target first. Try MULTI after Workstation reports the available GPU choices.",
-                    "",
-                    "Iterations is the number of timed inference calls inside each run.",
-                    "Example: Iterations 50 means each run contributes 50 measured latency samples.",
-                    "More iterations reduce random timing noise, but increase benchmark duration.",
-                    "",
-                    "Warmup is the number of untimed inference calls performed before measurement begins.",
-                    "Warmup lets device initialization, caches, and OpenVINO execution paths settle before timing.",
-                    "Warmup results are discarded. A value from 3 to 10 is usually enough for a quick comparison.",
-                    "",
-                    "Runs is the number of complete iteration groups.",
-                    "Total measured samples equal Iterations multiplied by Runs; Warmup is not included.",
-                    "Example: 50 Iterations and 3 Runs produce 150 measured samples after warmup.",
-                    "Use multiple runs to see whether performance remains consistent over time.",
-                    "",
-                    "Performance hint: asks OpenVINO to favor latency or throughput when supported.",
-                    "LATENCY favors completing one request quickly. THROUGHPUT favors completing more requests over time.",
-                    "Sample input folder: optional folder for preset benchmark sample inputs.",
-                    "Run Generic Benchmark: measures the selected model and prints timing results here.",
-                };
-            }
-
-            if (selectedTab == tabVisualization)
-            {
-                return new[]
-                {
-                    "Visualization turns saved benchmark results into charts.",
-                    "CSV: choose the benchmark result file you want to view.",
-                    "Metric: choose what value to chart, such as latency or throughput.",
-                    "Render Chart: draws the chart in the chart area.",
-                    "Use this tab with a CSV file you already have. Benchmarks in this app are not saved to disk.",
+                    "If GPU does not appear here, model tests and conversion GPU runs will not work yet.",
                 };
             }
 
@@ -2365,22 +2316,6 @@ namespace WorkStationC_
             lblInferText.Enabled = textInputsApply;
             txtInferText.Enabled = textInputsApply;
 
-            // Generic Benchmark drives Core tensors; it is not a token-generation benchmark.
-            bool isCompiledBlob = _selectedRuntimeModelKind == ModelFileKind.OpenVinoCompiledBlob;
-            bool genericBenchmarkApplies = isLoaded && !isTextGenerationModel && !isCompiledBlob;
-            lblBenchIterations.Enabled = genericBenchmarkApplies;
-            numBenchIterations.Enabled = genericBenchmarkApplies;
-            lblBenchIterationsHelp.Enabled = genericBenchmarkApplies;
-            lblBenchWarmup.Enabled = genericBenchmarkApplies;
-            numBenchWarmup.Enabled = genericBenchmarkApplies;
-            lblBenchWarmupHelp.Enabled = genericBenchmarkApplies;
-            lblBenchRuns.Enabled = genericBenchmarkApplies;
-            numBenchRuns.Enabled = genericBenchmarkApplies;
-            lblBenchRunsHelp.Enabled = genericBenchmarkApplies;
-            lblPerformanceHint.Enabled = genericBenchmarkApplies;
-            cboPerformanceHint.Enabled = genericBenchmarkApplies;
-            btnRunGenericBenchmark.Enabled = genericBenchmarkApplies;
-
             if (tabMain.SelectedTab == tabTests)
             {
                 txtTestModelPath.Text = isLoaded
@@ -2405,14 +2340,6 @@ namespace WorkStationC_
             {
                 AppendOutput("Tests: this model can use text and images. Run Image Test returns a text answer for vision-language models.");
             }
-            else if (tabMain.SelectedTab == tabBenchmark && isTextGenerationModel)
-            {
-                AppendOutput("Benchmark: generic Core tensor controls are disabled for this GenAI text-generation model.");
-            }
-            else if (tabMain.SelectedTab == tabBenchmark && isCompiledBlob)
-            {
-                AppendOutput("Benchmark: the generic source-model benchmark does not yet measure imported compiled blobs.");
-            }
         }
 
         private void UpdateRuntimeTabAvailability(bool modelLoaded)
@@ -2422,8 +2349,6 @@ namespace WorkStationC_
             tabDownloads.Enabled = true;
             tabServerTests.Enabled = true;
 
-            tabBenchmark.Enabled = modelLoaded;
-            tabVisualization.Enabled = modelLoaded;
             tabConvert.Enabled = true;
             tabTests.Enabled = modelLoaded;
 
@@ -2665,22 +2590,6 @@ namespace WorkStationC_
             {
                 target.Text = dialog.FileName;
                 AppendOutput($"Selected file: {dialog.FileName}");
-            }
-        }
-
-        private void BrowseForCsvFile(TextBox target)
-        {
-            using OpenFileDialog dialog = new()
-            {
-                Title = "Select benchmark CSV",
-                Filter = "CSV files|*.csv|All files (*.*)|*.*",
-                CheckFileExists = true,
-            };
-
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-            {
-                target.Text = dialog.FileName;
-                AppendOutput($"Selected CSV: {dialog.FileName}");
             }
         }
 
@@ -8343,7 +8252,7 @@ namespace WorkStationC_
             AppendOutput(string.Empty);
             AppendOutput("Download Help - choosing a model format");
             AppendOutput("------------------------------------------------------------");
-            AppendOutput(".xml + .bin: OpenVINO IR. The .xml describes the network; the matching .bin holds the weights. Choose this when you want the best OpenVINO path for Intel GPU targets, MULTI, benchmarking, and Convert.");
+            AppendOutput(".xml + .bin: OpenVINO IR. The .xml describes the network; the matching .bin holds the weights. Choose this when you want the best OpenVINO path for Intel GPU targets, MULTI, model tests, and Convert.");
             AppendOutput(".blob: device-optimized OpenVINO compiled model. Choose this after Convert creates it for a specific target such as GPU or MULTI. It loads quickly, but it is tied to the selected device and OpenVINO runtime version.");
             AppendOutput(".onnx, .pb, .tflite, .caffemodel, .pdmodel: source formats OpenVINO Core can read. They are convenient downloads, but converting or exporting to IR/blob usually gives this app more predictable behavior.");
             AppendOutput(".gguf: single-file chat model format used by llama.cpp and Ollama-style LLMs. Choose it when you want a quick local text model and the architecture is supported by OpenVINO GenAI.");
@@ -8360,12 +8269,12 @@ namespace WorkStationC_
             AppendOutput(".engine, .plan: TensorRT engine files. They are NVIDIA-specific compiled models and are not useful for OpenVINO on Intel GPUs.");
             AppendOutput(".mlmodel: Apple Core ML model. Useful on Apple platforms, but not a direct runtime model for this Windows/OpenVINO app.");
             AppendOutput("Why choose .xml/.bin instead of .gguf?");
-            AppendOutput("  Choose .xml/.bin or a converted blob when you want the normal OpenVINO runtime path, model inspection, image/classification models, generic benchmarking, or the most control over GPU compilation.");
+            AppendOutput("  Choose .xml/.bin or a converted blob when you want the normal OpenVINO runtime path, model inspection, image/classification models, or the most control over GPU compilation.");
             AppendOutput("  Choose .gguf when you mainly want a text chat model and accept the GenAI GGUF route. Use OVMS Pull with --gguf_filename for direct Hugging Face GGUF pulls.");
             AppendOutput("Intel Arc Pro B70 GPU notes");
             AppendOutput("  The file extension does not directly choose special GPU registers. OpenVINO chooses GPU kernels and hardware features after you compile or load the model for a GPU target.");
-            AppendOutput("  Intel Arc Pro B70 is an Xe2 GPU with Intel XMX engines and OpenVINO support. To give OpenVINO the best chance to use those GPU features, use an OpenVINO IR model or a GPU-targeted blob, select GPU.0, GPU.1, GPU.2, or MULTI on Workstation, then load or benchmark it.");
-            AppendOutput("  GGUF can still run on Intel GPU through OpenVINO GenAI for supported LLMs, but it is the less general path and may not expose the same conversion, inspection, or benchmark controls.");
+            AppendOutput("  Intel Arc Pro B70 is an Xe2 GPU with Intel XMX engines and OpenVINO support. To give OpenVINO the best chance to use those GPU features, use an OpenVINO IR model or a GPU-targeted blob, select GPU.0, GPU.1, GPU.2, or MULTI on Workstation, then load it.");
+            AppendOutput("  GGUF can still run on Intel GPU through OpenVINO GenAI for supported LLMs, but it is the less general path and may not expose the same conversion or inspection controls.");
             AppendOutput("Rule of thumb: for Arc Pro B70 testing, use supported GGUF models through GenAI when you want a text chat model. Use Convert only when you already have OpenVINO .xml/.bin and want a GPU-targeted blob.");
             AppendOutput(string.Empty);
         }
@@ -10869,7 +10778,7 @@ namespace WorkStationC_
                     AppendOutput($"    {output}");
                 }
 
-                AppendOutput($"  Status: model compiled successfully for {result.CompiledDevices.Count} target(s). Use Load Model to send it to Inference and Benchmark.");
+                AppendOutput($"  Status: model compiled successfully for {result.CompiledDevices.Count} target(s). Use Load Model to send it to Tests.");
             }
             catch (OperationCanceledException)
             {
@@ -10914,7 +10823,7 @@ namespace WorkStationC_
             CancellationToken cancellationToken = operation.Token;
             btnConvertToIr.Enabled = false;
             string oldStatus = lblModelsStatus.Text;
-            lblModelsStatus.Text = "Loading model metadata into Inference and Benchmark...";
+            lblModelsStatus.Text = "Loading model metadata into Tests...";
 
             try
             {
@@ -10951,7 +10860,7 @@ namespace WorkStationC_
                 }
 
                 txtInferModel.Text = Path.GetDirectoryName(result.ModelPath) ?? result.ModelPath;
-                AppendOutput("  Status: loaded into Inference and Benchmark.");
+                AppendOutput("  Status: loaded into Tests.");
             }
             catch (OperationCanceledException)
             {
@@ -11303,382 +11212,6 @@ namespace WorkStationC_
 
             return File.Exists(entry.SourcePath) ? entry : null;
         }
-        #endregion
-
-        #region Benchmark
-        private async void btnRunGenericBenchmark_Click(object? sender, EventArgs e) => await RunGenericBenchmarkAsync("Generic benchmark");
-        private void cboPerformanceHint_SelectedIndexChanged(object? sender, EventArgs e) => AppendOutput($"Benchmark performance hint: {cboPerformanceHint.Text}");
-        private async Task RunGenericBenchmarkAsync(string label)
-        {
-            string selectedFolder = txtInferModel.Text.Trim();
-            string reason = "No model folder was selected.";
-            if (string.IsNullOrWhiteSpace(selectedFolder)
-                || !RefreshSelectedRuntimeModelState(out reason))
-            {
-                AppendOutput($"{label}: no runnable model found under: {selectedFolder}");
-                AppendOutput($"  {reason}");
-                return;
-            }
-
-            if (_selectedRuntimeModelKind is ModelFileKind.Gguf or ModelFileKind.OpenVinoGenAiDirectory)
-            {
-                AppendOutput($"{label}: {DescribeRuntimeModelKind(_selectedRuntimeModelKind)} requires a token-generation benchmark.");
-                AppendOutput("  The current generic benchmark measures OpenVINO Core tensor inference only.");
-                return;
-            }
-
-            string modelPath = _selectedRuntimeModelPath;
-            AppendOutput($"{label}: resolved runtime model: {modelPath}");
-
-            if (!TryGetPrimaryCompileTarget(out string device))
-            {
-                return;
-            }
-
-            int iterations = (int)numBenchIterations.Value;
-            int warmup = (int)numBenchWarmup.Value;
-            int runs = (int)numBenchRuns.Value;
-            string performanceHint = string.IsNullOrWhiteSpace(cboPerformanceHint.Text)
-                ? "LATENCY"
-                : cboPerformanceHint.Text;
-
-            CancellationTokenSource? operation = await TryBeginLongOperationAsync("Running benchmark...", allowCancel: true);
-            if (operation is null)
-            {
-                return;
-            }
-            CancellationToken cancellationToken = operation.Token;
-            btnRunGenericBenchmark.Enabled = false;
-            try
-            {
-                WorkStationC_.Models.BenchmarkResult? result = await Task.Run(() => RunOpenVinoBenchmarkCore(
-                    label,
-                    modelPath,
-                    device,
-                    iterations,
-                    warmup,
-                    runs,
-                    performanceHint,
-                    cancellationToken), cancellationToken);
-
-                if (result is not null)
-                {
-                    lblVizStatus.Text = "Latest benchmark finished. Results were not saved.";
-                    AppendOutput("  Status: benchmark complete. Results were not saved.");
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                AppendOutput($"{label} canceled.");
-            }
-            catch (Exception ex)
-            {
-                AppendOutput($"{label} failed:");
-                foreach (string line in FormatException(ex))
-                {
-                    AppendOutput($"  {line}");
-                }
-            }
-            finally
-            {
-                btnRunGenericBenchmark.Enabled = true;
-                FinishLongOperation();
-            }
-        }
-
-        private WorkStationC_.Models.BenchmarkResult? RunOpenVinoBenchmarkCore(
-            string label,
-            string modelPath,
-            string device,
-            int iterations,
-            int warmup,
-            int runs,
-            string performanceHint,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            AppendOutput($"{label} - {device}");
-            AppendOutput($"  Performance hint: {performanceHint}");
-            ConfigureOpenVinoRuntimeSearchPath();
-
-            string? binPath = FindMatchingBinPath(modelPath);
-            using OpenVinoSharp.Core core = new();
-            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            using OpenVinoSharp.Model model = string.IsNullOrWhiteSpace(binPath)
-                ? core.ReadModelUnicode(modelPath)
-                : core.ReadModelUnicode(modelPath, binPath);
-            stopwatch.Stop();
-            cancellationToken.ThrowIfCancellationRequested();
-            double readMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-            AppendOutput($"  Read time: {readMilliseconds:N3} ms");
-
-            Dictionary<string, string> compileProperties = new()
-            {
-                [OpenVinoSharp.PropertyKeys.HintPerformanceMode] = performanceHint,
-            };
-
-            stopwatch.Restart();
-            using OpenVinoSharp.CompiledModel compiledModel = core.CompileModel(model, device, compileProperties);
-            stopwatch.Stop();
-            cancellationToken.ThrowIfCancellationRequested();
-            double compileMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-            AppendOutput($"  Compile time: {compileMilliseconds:N3} ms");
-
-            using OpenVinoSharp.InferRequest request = compiledModel.CreateInferRequest();
-            List<OpenVinoSharp.Tensor> inputTensors = new();
-            try
-            {
-                if (!TryAttachDefaultInputTensors(compiledModel, request, inputTensors, out string reason))
-                {
-                    AppendOutput($"  Benchmark skipped: {reason}");
-                    return null;
-                }
-
-                double firstInferenceMilliseconds = 0;
-                for (int i = 0; i < warmup; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    stopwatch.Restart();
-                    request.Infer();
-                    stopwatch.Stop();
-                    if (i == 0)
-                    {
-                        firstInferenceMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-                    }
-                }
-
-                List<double> samples = new(iterations * runs);
-                for (int run = 0; run < runs; run++)
-                {
-                    for (int i = 0; i < iterations; i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        stopwatch.Restart();
-                        request.Infer();
-                        stopwatch.Stop();
-                        samples.Add(stopwatch.Elapsed.TotalMilliseconds);
-                    }
-                }
-
-                double average = samples.Count == 0 ? 0 : samples.Average();
-                double throughput = average <= 0 ? 0 : 1000.0 / average;
-                double[] sortedSamples = samples.OrderBy(value => value).ToArray();
-                if (firstInferenceMilliseconds == 0 && sortedSamples.Length > 0)
-                {
-                    firstInferenceMilliseconds = samples[0];
-                }
-
-                double minimum = sortedSamples.Length == 0 ? 0 : sortedSamples[0];
-                double median = CalculatePercentile(sortedSamples, 0.50);
-                double p90 = CalculatePercentile(sortedSamples, 0.90);
-                double p95 = CalculatePercentile(sortedSamples, 0.95);
-                double p99 = CalculatePercentile(sortedSamples, 0.99);
-                double maximum = sortedSamples.Length == 0 ? 0 : sortedSamples[^1];
-                AppendOutput($"  Samples: {samples.Count}");
-                AppendOutput($"  Average latency: {average:N3} ms");
-                AppendOutput($"  Minimum latency: {minimum:N3} ms");
-                AppendOutput($"  Median latency: {median:N3} ms");
-                AppendOutput($"  P95 latency: {p95:N3} ms");
-                AppendOutput($"  Throughput: {throughput:N2} infer/sec");
-
-                return new WorkStationC_.Models.BenchmarkResult
-                {
-                    CompletedAtUtc = DateTimeOffset.UtcNow,
-                    Label = label,
-                    ModelPath = modelPath,
-                    Device = device,
-                    PerformanceHint = performanceHint,
-                    Iterations = iterations,
-                    Warmup = warmup,
-                    Runs = runs,
-                    SampleCount = samples.Count,
-                    ReadMilliseconds = readMilliseconds,
-                    CompileMilliseconds = compileMilliseconds,
-                    FirstInferenceMilliseconds = firstInferenceMilliseconds,
-                    MinimumMilliseconds = minimum,
-                    AverageMilliseconds = average,
-                    MedianMilliseconds = median,
-                    P90Milliseconds = p90,
-                    P95Milliseconds = p95,
-                    P99Milliseconds = p99,
-                    MaximumMilliseconds = maximum,
-                    ThroughputPerSecond = throughput,
-                    SamplesMilliseconds = samples.ToArray(),
-                };
-            }
-            finally
-            {
-                foreach (OpenVinoSharp.Tensor tensor in inputTensors)
-                {
-                    tensor.Dispose();
-                }
-            }
-        }
-
-        private static double CalculatePercentile(IReadOnlyList<double> sortedValues, double percentile)
-        {
-            if (sortedValues.Count == 0)
-            {
-                return 0;
-            }
-
-            double position = Math.Clamp(percentile, 0, 1) * (sortedValues.Count - 1);
-            int lowerIndex = (int)Math.Floor(position);
-            int upperIndex = (int)Math.Ceiling(position);
-            if (lowerIndex == upperIndex)
-            {
-                return sortedValues[lowerIndex];
-            }
-
-            double fraction = position - lowerIndex;
-            return sortedValues[lowerIndex] + ((sortedValues[upperIndex] - sortedValues[lowerIndex]) * fraction);
-        }
-        #endregion
-
-        #region Visualization
-        private void btnBrowseVizCsv_Click(object? sender, EventArgs e) => BrowseForCsvFile(txtVizCsv);
-        private void btnRenderChart_Click(object? sender, EventArgs e) => RenderBenchmarkChart();
-        private void cboVizMetric_SelectedIndexChanged(object? sender, EventArgs e) => AppendOutput($"Visualization metric: {cboVizMetric.Text}");
-        private void RenderBenchmarkChart()
-        {
-            string csvPath = txtVizCsv.Text.Trim();
-            if (string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath))
-            {
-                AppendOutput($"Visualization: CSV file not found: {csvPath}");
-                return;
-            }
-
-            string metric = string.IsNullOrWhiteSpace(cboVizMetric.Text) ? "avg_ms" : cboVizMetric.Text;
-            List<double> values = ReadCsvMetricValues(csvPath, metric);
-            if (values.Count == 0)
-            {
-                AppendOutput($"Visualization: no numeric `{metric}` values found in {csvPath}.");
-                return;
-            }
-
-            Bitmap bitmap = DrawSimpleBarChart(values, metric, pnlChart.Width, pnlChart.Height);
-            pnlChart.BackgroundImage?.Dispose();
-            pnlChart.BackgroundImage = bitmap;
-            pnlChart.BackgroundImageLayout = ImageLayout.Stretch;
-            lblChartPlaceholder.Visible = false;
-            lblVizStatus.Text = $"Rendered {values.Count} {metric} value(s).";
-            AppendOutput($"Visualization: rendered {values.Count} {metric} value(s).");
-        }
-
-        private static List<double> ReadCsvMetricValues(string csvPath, string metric)
-        {
-            string[] lines = File.ReadAllLines(csvPath);
-            if (lines.Length < 2)
-            {
-                return new List<double>();
-            }
-
-            IReadOnlyList<string> headers = ParseCsvRow(lines[0]);
-            int metricIndex = -1;
-            for (int index = 0; index < headers.Count; index++)
-            {
-                if (headers[index].Trim().Equals(metric, StringComparison.OrdinalIgnoreCase))
-                {
-                    metricIndex = index;
-                    break;
-                }
-            }
-            if (metricIndex < 0)
-            {
-                return new List<double>();
-            }
-
-            List<double> values = new();
-            foreach (string line in lines.Skip(1))
-            {
-                IReadOnlyList<string> cells = ParseCsvRow(line);
-                if (metricIndex < cells.Count
-                    && double.TryParse(
-                        cells[metricIndex],
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out double value))
-                {
-                    values.Add(value);
-                }
-            }
-
-            return values;
-        }
-
-        private static IReadOnlyList<string> ParseCsvRow(string row)
-        {
-            List<string> fields = new();
-            System.Text.StringBuilder field = new();
-            bool quoted = false;
-            for (int index = 0; index < row.Length; index++)
-            {
-                char character = row[index];
-                if (character == '"')
-                {
-                    if (quoted && index + 1 < row.Length && row[index + 1] == '"')
-                    {
-                        field.Append('"');
-                        index++;
-                    }
-                    else
-                    {
-                        quoted = !quoted;
-                    }
-                }
-                else if (character == ',' && !quoted)
-                {
-                    fields.Add(field.ToString());
-                    field.Clear();
-                }
-                else
-                {
-                    field.Append(character);
-                }
-            }
-
-            if (quoted)
-            {
-                throw new InvalidDataException("The benchmark CSV contains an unterminated quoted field.");
-            }
-
-            fields.Add(field.ToString());
-            return fields;
-        }
-
-        private static Bitmap DrawSimpleBarChart(IReadOnlyList<double> values, string metric, int width, int height)
-        {
-            width = Math.Max(320, width);
-            height = Math.Max(180, height);
-            Bitmap bitmap = new(width, height);
-            using Graphics graphics = Graphics.FromImage(bitmap);
-            graphics.Clear(Color.FromArgb(30, 30, 30));
-            using Brush textBrush = new SolidBrush(Color.Gainsboro);
-            using Brush barBrush = new SolidBrush(Color.FromArgb(76, 175, 235));
-            using Pen axisPen = new(Color.Gray);
-            using Font font = new("Segoe UI", 9F);
-
-            graphics.DrawString(metric, font, textBrush, 12, 10);
-            int left = 42;
-            int top = 34;
-            int bottom = height - 34;
-            int chartHeight = Math.Max(1, bottom - top);
-            double max = Math.Max(1, values.Max());
-            int barWidth = Math.Max(2, (width - left - 20) / values.Count);
-            graphics.DrawLine(axisPen, left, top, left, bottom);
-            graphics.DrawLine(axisPen, left, bottom, width - 12, bottom);
-
-            for (int i = 0; i < values.Count; i++)
-            {
-                int barHeight = (int)Math.Round(values[i] / max * chartHeight);
-                int x = left + i * barWidth;
-                graphics.FillRectangle(barBrush, x + 1, bottom - barHeight, Math.Max(1, barWidth - 2), barHeight);
-            }
-
-            graphics.DrawString($"max {max:N2}", font, textBrush, 8, top);
-            return bitmap;
-        }
-
         #endregion
 
         #region Tests
