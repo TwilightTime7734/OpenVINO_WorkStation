@@ -1,0 +1,8 @@
+root = true
+
+[*]
+end_of_line = crlf
+insert_final_newline = true
+
+[*.{cs,csproj,slnx,resx,md,txt,cfg,json,xml,props,targets}]
+charset = utf-8

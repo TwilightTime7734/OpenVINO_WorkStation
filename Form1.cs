@@ -14,7 +14,7 @@ namespace WorkStationC_
             InitializeControlBehavior();
         }
 
-        #region MainForm.Common.cs
+        #region Common
         private const ulong MaxChatResponseTokens = 64;
 
         private const int NativeDialogCancelled = unchecked((int)0x800704C7);
@@ -30,6 +30,22 @@ namespace WorkStationC_
             Gguf,
             PyTorchSource,
             SupportFile,
+        }
+
+        private enum ModelRunPath
+        {
+            Unknown,
+            TextGeneration,
+            VisionLanguage,
+            TextToImage,
+            ImageToImage,
+            ImageClassification,
+            ObjectDetection,
+            SpeechRecognition,
+            TextEmbedding,
+            OpenVinoCore,
+            CompiledBlob,
+            Unsupported,
         }
 
         private enum FolderPickerResult
@@ -48,11 +64,21 @@ namespace WorkStationC_
             string DisplayText,
             IReadOnlyList<string> OutputLines);
 
+        private sealed record ModelConfigClassification(
+            ModelRunPath RunPath,
+            bool AcceptsText,
+            bool AcceptsImage,
+            bool ReturnsImage,
+            bool ImageTestAvailable,
+            IReadOnlyList<string> Evidence);
+
         private string _selectedModelFolder = string.Empty;
 
         private string _selectedRuntimeModelPath = string.Empty;
 
         private ModelFileKind _selectedRuntimeModelKind = ModelFileKind.Unknown;
+
+        private ModelRunPath _selectedModelRunPath = ModelRunPath.Unknown;
 
         private string _loadedRuntimeModelPath = string.Empty;
 
@@ -85,6 +111,10 @@ namespace WorkStationC_
         private volatile bool _longOperationCancelRequested;
 
         private bool _pendingRuntimeModelRefresh;
+
+        private readonly Dictionary<string, OvmsPullCommandBlock> _ovmsPullCommandDefaultsBySource = new(StringComparer.OrdinalIgnoreCase);
+
+        private bool _updatingOvmsPullDefaults;
 
         private Task<T> RunOnUiThreadAsync<T>(Func<T> action)
         {
@@ -152,6 +182,7 @@ namespace WorkStationC_
             lblChartPlaceholder.ForeColor = mutedText;
             lblIrPlaceholder.ForeColor = mutedText;
             lblModelsStatus.ForeColor = mutedText;
+            lblOvmsPullStatus.ForeColor = mutedText;
             lblDownloadStatus.ForeColor = mutedText;
 
             pnlChart.BackColor = inputBack;
@@ -412,6 +443,7 @@ namespace WorkStationC_
                 AppendOutput("GGUF GenAI test");
                 AppendOutput($"  Model: {modelPath}");
                 AppendOutput($"  Device: {device}");
+                AppendGenAiDeviceDetails(device);
                 AppendOutput("  Note: GGUF uses OpenVINO GenAI LLMPipeline, not Core IR compile.");
                 if (!EnsureOpenVinoGenAiRuntimeAvailable(out string reason))
                 {
@@ -482,7 +514,7 @@ namespace WorkStationC_
                 }
 
                 await Task.CompletedTask;
-                AppendOutput("  Status: GGUF model path loaded. Use GGUF GenAI test on Convert to validate runtime support.");
+                AppendOutput("  Status: GGUF model path loaded for OpenVINO GenAI runtime use.");
             }
             finally
             {
@@ -498,6 +530,24 @@ namespace WorkStationC_
             public string GeneratedText { get; init; } = string.Empty;
         }
 
+        private sealed record GenAiTextRunAttempt(GgufTestResult? Result, Exception? Error);
+
+        private sealed record GgufMetadataSummary(
+            string Architecture,
+            string Name,
+            string TokenizerModel,
+            string SizeLabel);
+
+        private sealed record GenAiDeviceSettings(
+            string DisplayDevice,
+            string PipelineDevice,
+            IReadOnlyDictionary<string, string> Properties)
+        {
+            public string CacheKey => Properties.Count == 0
+                ? PipelineDevice
+                : $"{PipelineDevice}|{string.Join(";", Properties.Select(property => $"{property.Key}={property.Value}"))}";
+        }
+
         private GgufTestResult RunGgufGenAiSmokeTest(
             string modelPath,
             string device,
@@ -505,21 +555,26 @@ namespace WorkStationC_
             IProgress<string>? progress = null,
             IProgress<string>? streamedText = null,
             CancellationToken cancellationToken = default,
-            ulong maxNewTokens = MaxChatResponseTokens)
+            ulong maxNewTokens = MaxChatResponseTokens,
+            bool enableThinking = false,
+            bool preserveThinking = false)
         {
+            GenAiDeviceSettings deviceSettings = BuildGenAiDeviceSettings(device);
             cancellationToken.ThrowIfCancellationRequested();
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
             bool reusedLoadedModel = _cachedGenAiPipeline is not null
                 && string.Equals(_cachedGenAiModelPath, modelPath, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(_cachedGenAiDevice, device, StringComparison.OrdinalIgnoreCase);
+                && string.Equals(_cachedGenAiDevice, deviceSettings.CacheKey, StringComparison.OrdinalIgnoreCase);
             if (!reusedLoadedModel)
             {
                 DisposeCachedGenAiPipeline();
                 cancellationToken.ThrowIfCancellationRequested();
-                _cachedGenAiPipeline = new OpenVinoSharp.GenAI.LLMPipeline(modelPath, device);
+                _cachedGenAiPipeline = deviceSettings.Properties.Count == 0
+                    ? new OpenVinoSharp.GenAI.LLMPipeline(modelPath, deviceSettings.PipelineDevice)
+                    : new OpenVinoSharp.GenAI.LLMPipeline(modelPath, deviceSettings.PipelineDevice, new Dictionary<string, string>(deviceSettings.Properties));
                 _cachedGenAiPipeline.StartChat();
                 _cachedGenAiModelPath = modelPath;
-                _cachedGenAiDevice = device;
+                _cachedGenAiDevice = deviceSettings.CacheKey;
             }
 
             stopwatch.Stop();
@@ -532,43 +587,171 @@ namespace WorkStationC_
             config.SetMaxNewTokens(maxNewTokens);
             config.SetDoSample(false);
 
-            string chatPrompt = modelPath.Contains("qwen3", StringComparison.OrdinalIgnoreCase)
-                ? $"{prompt} /no_think"
-                : prompt;
             stopwatch.Restart();
             System.Text.StringBuilder generatedBuilder = new();
-            using OpenVinoSharp.GenAI.DecodedResults decodedResults = _cachedGenAiPipeline!.Generate(
-                chatPrompt,
-                config,
-                text =>
-                {
-                    if (cancellationToken.IsCancellationRequested || _longOperationCancelRequested)
-                    {
-                        return OpenVinoSharp.GenAI.StreamingStatus.Cancel;
-                    }
-
-                    if (!string.IsNullOrEmpty(text))
-                    {
-                        generatedBuilder.Append(text);
-                        streamedText?.Report(text);
-                    }
-
-                    return OpenVinoSharp.GenAI.StreamingStatus.Running;
-                });
-            stopwatch.Stop();
-            cancellationToken.ThrowIfCancellationRequested();
-            string generated = generatedBuilder.Length > 0
-                ? generatedBuilder.ToString()
-                : decodedResults.GetText();
-
-            return new GgufTestResult
+            _cachedGenAiPipeline!.FinishChat();
+            _cachedGenAiPipeline.StartChat();
+            using OpenVinoSharp.GenAI.ChatHistory chatHistory = BuildGenAiChatHistory(modelPath, prompt, enableThinking, preserveThinking, out OpenVinoSharp.GenAI.JsonContainer? extraContext);
+            try
             {
-                LoadMilliseconds = loadMs,
-                GenerateMilliseconds = stopwatch.ElapsedMilliseconds,
-                GeneratedText = generated,
-            };
+                using OpenVinoSharp.GenAI.DecodedResults decodedResults = _cachedGenAiPipeline.GenerateWithHistory(
+                    chatHistory,
+                    config,
+                    text =>
+                    {
+                        if (cancellationToken.IsCancellationRequested || _longOperationCancelRequested)
+                        {
+                            return OpenVinoSharp.GenAI.StreamingStatus.Cancel;
+                        }
+
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            generatedBuilder.Append(text);
+                            streamedText?.Report(text);
+                        }
+
+                        return OpenVinoSharp.GenAI.StreamingStatus.Running;
+                    });
+                stopwatch.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
+                string generated = NormalizeGeneratedAnswerText(generatedBuilder.Length > 0
+                    ? generatedBuilder.ToString()
+                    : decodedResults.GetText());
+
+                return new GgufTestResult
+                {
+                    LoadMilliseconds = loadMs,
+                    GenerateMilliseconds = stopwatch.ElapsedMilliseconds,
+                    GeneratedText = generated,
+                };
+            }
+            finally
+            {
+                extraContext?.Dispose();
+            }
+        }
+        private GgufTestResult RunVlmGenAiTextSmokeTest(
+            string modelPath,
+            string device,
+            string prompt = "Describe this image.",
+            IProgress<string>? progress = null,
+            IProgress<string>? streamedText = null,
+            CancellationToken cancellationToken = default,
+            ulong maxNewTokens = MaxChatResponseTokens,
+            bool enableThinking = false,
+            bool preserveThinking = false)
+        {
+            GenAiDeviceSettings deviceSettings = BuildGenAiDeviceSettings(device);
+            cancellationToken.ThrowIfCancellationRequested();
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            bool reusedLoadedModel = _cachedVlmPipeline is not null
+                && string.Equals(_cachedVlmModelPath, modelPath, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(_cachedVlmDevice, deviceSettings.CacheKey, StringComparison.OrdinalIgnoreCase);
+            if (!reusedLoadedModel)
+            {
+                DisposeCachedGenAiPipeline();
+                cancellationToken.ThrowIfCancellationRequested();
+                _cachedVlmPipeline = deviceSettings.Properties.Count == 0
+                    ? new OpenVinoSharp.GenAI.VLMPipeline(modelPath, deviceSettings.PipelineDevice)
+                    : new OpenVinoSharp.GenAI.VLMPipeline(modelPath, deviceSettings.PipelineDevice, new Dictionary<string, string>(deviceSettings.Properties));
+                _cachedVlmPipeline.StartChat();
+                _cachedVlmModelPath = modelPath;
+                _cachedVlmDevice = deviceSettings.CacheKey;
+            }
+
+            stopwatch.Stop();
+            long loadMs = reusedLoadedModel ? 0 : stopwatch.ElapsedMilliseconds;
+            progress?.Report(reusedLoadedModel
+                ? "Model ready. Generating response..."
+                : "Model loaded. Generating response...");
+
+            using OpenVinoSharp.GenAI.GenerationConfig config = new();
+            config.SetMaxNewTokens(maxNewTokens);
+            config.SetDoSample(false);
+
+            stopwatch.Restart();
+            System.Text.StringBuilder generatedBuilder = new();
+            _cachedVlmPipeline!.FinishChat();
+            _cachedVlmPipeline.StartChat();
+            using OpenVinoSharp.GenAI.ChatHistory chatHistory = BuildGenAiChatHistory(modelPath, prompt, enableThinking, preserveThinking, out OpenVinoSharp.GenAI.JsonContainer? extraContext);
+            try
+            {
+                using OpenVinoSharp.GenAI.VLMDecodedResults decodedResults = _cachedVlmPipeline.GenerateWithHistory(
+                    chatHistory,
+                    null,
+                    config,
+                    text =>
+                    {
+                        if (cancellationToken.IsCancellationRequested || _longOperationCancelRequested)
+                        {
+                            return OpenVinoSharp.GenAI.StreamingStatus.Cancel;
+                        }
+
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            generatedBuilder.Append(text);
+                            streamedText?.Report(text);
+                        }
+
+                        return OpenVinoSharp.GenAI.StreamingStatus.Running;
+                    });
+                stopwatch.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
+                string generated = NormalizeGeneratedAnswerText(generatedBuilder.Length > 0
+                    ? generatedBuilder.ToString()
+                    : decodedResults.GetText());
+
+                return new GgufTestResult
+                {
+                    LoadMilliseconds = loadMs,
+                    GenerateMilliseconds = stopwatch.ElapsedMilliseconds,
+                    GeneratedText = generated,
+                };
+            }
+            finally
+            {
+                extraContext?.Dispose();
+            }
         }
 
+        private static OpenVinoSharp.GenAI.ChatHistory BuildGenAiChatHistory(
+            string modelPath,
+            string prompt,
+            bool enableThinking,
+            bool preserveThinking,
+            out OpenVinoSharp.GenAI.JsonContainer? extraContext)
+        {
+            OpenVinoSharp.GenAI.ChatHistory chatHistory = new();
+            chatHistory.AddUserMessage(prompt);
+            extraContext = null;
+
+            if (modelPath.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+            {
+                string thinkingOptionsJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    enable_thinking = enableThinking,
+                    preserve_thinking = preserveThinking,
+                });
+                extraContext = OpenVinoSharp.GenAI.JsonContainer.FromJsonString(
+                    thinkingOptionsJson);
+                chatHistory.SetExtraContext(extraContext);
+            }
+
+            return chatHistory;
+        }
+
+        private static string NormalizeGeneratedAnswerText(string generated)
+        {
+            string text = (generated ?? string.Empty).Trim();
+            const string thinkEnd = "</think>";
+            int thinkEndIndex = text.LastIndexOf(thinkEnd, StringComparison.OrdinalIgnoreCase);
+            if (thinkEndIndex >= 0)
+            {
+                text = text[(thinkEndIndex + thinkEnd.Length)..].Trim();
+            }
+
+            return text;
+        }
         private GgufTestResult RunGgufGenAiSmokeTestSafely(
             string modelPath,
             string device,
@@ -578,9 +761,34 @@ namespace WorkStationC_
             CancellationToken cancellationToken = default,
             ulong maxNewTokens = MaxChatResponseTokens)
         {
+            return RunGenAiTextSmokeTestSafely(
+                modelPath,
+                device,
+                prompt,
+                progress,
+                streamedText,
+                cancellationToken,
+                useVisionPipeline: false,
+                maxNewTokens);
+        }
+
+        private GgufTestResult RunGenAiTextSmokeTestSafely(
+            string modelPath,
+            string device,
+            string prompt,
+            IProgress<string>? progress,
+            IProgress<string>? streamedText,
+            CancellationToken cancellationToken,
+            bool useVisionPipeline,
+            ulong maxNewTokens = MaxChatResponseTokens,
+            bool enableThinking = false,
+            bool preserveThinking = false)
+        {
             try
             {
-                return RunGgufGenAiSmokeTest(modelPath, device, prompt, progress, streamedText, cancellationToken, maxNewTokens);
+                return useVisionPipeline
+                    ? RunVlmGenAiTextSmokeTest(modelPath, device, prompt, progress, streamedText, cancellationToken, maxNewTokens, enableThinking, preserveThinking)
+                    : RunGgufGenAiSmokeTest(modelPath, device, prompt, progress, streamedText, cancellationToken, maxNewTokens, enableThinking, preserveThinking);
             }
             catch (OperationCanceledException)
             {
@@ -602,6 +810,12 @@ namespace WorkStationC_
             _cachedVlmPipeline = null;
             _cachedVlmModelPath = string.Empty;
             _cachedVlmDevice = string.Empty;
+        }
+
+        private bool HasCachedGenAiPipeline()
+        {
+            return _cachedGenAiPipeline is not null
+                || _cachedVlmPipeline is not null;
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -935,9 +1149,9 @@ namespace WorkStationC_
 
             string primaryTarget = GetPrimaryCompileTargetForCurrentThread();
             bool cachedTextDeviceChanged = _cachedGenAiPipeline is not null
-                && !string.Equals(_cachedGenAiDevice, primaryTarget, StringComparison.OrdinalIgnoreCase);
+                && !string.Equals(_cachedGenAiDevice, BuildGenAiDeviceSettings(primaryTarget).CacheKey, StringComparison.OrdinalIgnoreCase);
             bool cachedVisionDeviceChanged = _cachedVlmPipeline is not null
-                && !string.Equals(_cachedVlmDevice, primaryTarget, StringComparison.OrdinalIgnoreCase);
+                && !string.Equals(_cachedVlmDevice, BuildGenAiDeviceSettings(primaryTarget).CacheKey, StringComparison.OrdinalIgnoreCase);
             if (cachedTextDeviceChanged || cachedVisionDeviceChanged)
             {
                 DisposeCachedGenAiPipeline();
@@ -1121,9 +1335,9 @@ namespace WorkStationC_
                     "Download: downloads the files from the pasted address.",
                     "Button Label: enter the name to show on one of the saved website buttons.",
                     "Save To: choose which favorite button to update.",
-                    "Save Site: saves the current Button Label and Web Address to the selected favorite.",
-                    "Site 1 through Site 12: open your saved favorite model websites in the browser.",
-                    "Saved website buttons are stored in workbench.cfg beside the project.",
+                    "Save Address: saves the current Button Label and Web Address to the selected button.",
+                    "Site 1 through Site 12: fill Web Address with a saved model address.",
+                    "Saved address buttons are stored in workbench.cfg beside the project.",
                 };
             }
 
@@ -1131,34 +1345,30 @@ namespace WorkStationC_
             {
                 return new[]
                 {
-                    "Convert lists GGUF files from each model's gguf folder.",
-                    "Refresh Models scans each model's gguf folder first, then checks main for misplaced .gguf files.",
-                    "If Refresh Models finds a .gguf file in a model's main folder, it moves that file into a gguf folder beside main.",
-                    "Already converted GGUF files are hidden when the model's main folder already has matching OpenVINO .xml/.bin files.",
-                    "Choose .xml/.bin to save a supported GGUF model as OpenVINO IR through OpenVINO GenAI.",
-                    "Choose .blob to compile the saved IR for the current Workstation target.",
+                    "Convert lists OpenVINO .xml/.bin models under the main model folder.",
+                    "Refresh Models scans the model folder for model XML files with matching BIN weights.",
+                    "Choose .blob to compile the selected IR for the current Workstation target.",
                     "The .blob output is tied to the selected target and OpenVINO runtime version.",
                     "Blob output is written beside the model's main folder, such as ModelName\\GPU\\model.blob or ModelName\\MULTI\\model.blob.",
                     "",
-                    "Eligible GGUF files are text chat models that the bundled OpenVINO GenAI GGUF reader can open.",
-                    "OpenVINO GenAI support depends on the model architecture, tokenizer, and quantization type stored in the GGUF.",
-                    "A GGUF file may work in llama.cpp or Ollama but still fail here if OpenVINO GenAI does not support that GGUF layout.",
-                    "Keep the original GGUF until the created .xml/.bin model loads and generates correctly.",
+                    "Use OVMS Pull for GGUF files with a Hugging Face repo and --gguf_filename.",
+                    "Future ONNX, PyTorch, TensorFlow, and Paddle workflows belong in OVMS Pull or a source-converter path before this blob step.",
                 };
             }
 
-            if (selectedTab == tabLoadModel)
+            if (selectedTab == tabOvmsPull)
             {
                 return new[]
                 {
-                    "Optimum Intel exports Hugging Face source models to OpenVINO files.",
-                    "Source model: choose a downloaded source model folder or type a Hugging Face model ID.",
-                    "Refresh Models scans the main model folder again.",
-                    "Task chooses what kind of OpenVINO model Optimum should create.",
-                    "Weights chooses the saved model precision. Auto lets Optimum choose its default.",
-                    "Allow model code is only for repositories you trust.",
-                    "Create .blob after export compiles the exported model for the selected Workstation target.",
-                    "Export writes the OpenVINO files into the model's main folder.",
+                    "OVMS Pull runs ovms.exe --pull and writes the converted model into the selected model folder.",
+                    "The defaults come from Context.md when that file is present.",
+                    "Source model is the Hugging Face model ID, such as Qwen/Qwen3.5-4B.",
+                    "Task, pipeline type, and weights are passed directly to OVMS.",
+                    "Replace existing files adds --overwrite_models. Use it when rerunning the same pull; turn it off if you want to keep existing model files untouched.",
+                    "Debug log uses DEBUG logging. Turn it off for normal INFO logging.",
+                    "Python DLL folder is prepended to PATH so OVMS can load its bundled Python runtime before it starts the export subprocess.",
+                    "Export tools folder is also prepended to PATH so OVMS finds the same optimum-cli used by the working Command Prompt.",
+                    "Preview prints the command without running it. Start Pull opens a Command Prompt and runs the command there.",
                 };
             }
 
@@ -1410,12 +1620,18 @@ namespace WorkStationC_
                 _selectedModelFolder = selection.SelectedFolder;
                 _selectedRuntimeModelPath = selection.RuntimePath;
                 _selectedRuntimeModelKind = selection.Kind;
+                _selectedModelRunPath = ClassifySelectedRuntimeModel().RunPath;
                 bool selectedModelIsLoaded = _loadedRuntimeModelKind == selection.Kind
                     && string.Equals(
                         _loadedRuntimeModelPath,
                         selection.RuntimePath,
                         StringComparison.OrdinalIgnoreCase);
                 UpdateRuntimeTabAvailability(selectedModelIsLoaded);
+                if (!selectedModelIsLoaded)
+                {
+                    UpdateSelectedModelCapabilityPreview();
+                }
+
                 ApplySelectedModelCapabilitiesToActiveTab(reportStatus: false);
                 return true;
             }
@@ -1424,6 +1640,7 @@ namespace WorkStationC_
             DisposeCachedGenAiPipeline();
             _selectedRuntimeModelPath = string.Empty;
             _selectedRuntimeModelKind = ModelFileKind.Unknown;
+            _selectedModelRunPath = ModelRunPath.Unknown;
             _loadedRuntimeModelPath = string.Empty;
             _loadedRuntimeModelKind = ModelFileKind.Unknown;
             ResetLoadedModelCapabilities("Load a model to see what it can use.");
@@ -1436,7 +1653,7 @@ namespace WorkStationC_
         {
             _loadedRuntimeModelPath = string.Empty;
             _loadedRuntimeModelKind = ModelFileKind.Unknown;
-            ResetLoadedModelCapabilities("Model changed. Load it again to see what it can use.");
+            UpdateSelectedModelCapabilityPreview();
             UpdateRuntimeTabAvailability(modelLoaded: false);
         }
 
@@ -1456,6 +1673,16 @@ namespace WorkStationC_
             _loadedModelAcceptsImage = false;
             _loadedModelImageTestAvailable = false;
             txtModelCapabilities.Text = message;
+        }
+
+        private void UpdateSelectedModelCapabilityPreview()
+        {
+            _loadedModelAcceptsText = false;
+            _loadedModelAcceptsImage = false;
+            _loadedModelImageTestAvailable = false;
+            ModelConfigClassification classification = ClassifySelectedRuntimeModel();
+            _selectedModelRunPath = classification.RunPath;
+            txtModelCapabilities.Text = BuildModelCapabilityDisplay(classification, loaded: false);
         }
 
         private void UpdateLoadedModelCapabilities(bool reportToOutput)
@@ -1478,20 +1705,301 @@ namespace WorkStationC_
             }
         }
 
+        private ModelConfigClassification ClassifySelectedRuntimeModel()
+        {
+            return ClassifyModelRunPath(_selectedModelFolder, _selectedRuntimeModelPath, _selectedRuntimeModelKind);
+        }
+
+        private static string BuildModelCapabilityDisplay(ModelConfigClassification classification, bool loaded)
+        {
+            string state = loaded ? "Loaded" : "Selected";
+            string imageText = classification.AcceptsImage
+                ? classification.ReturnsImage ? "yes, returns image" : "yes"
+                : "not detected";
+            return $"{state}. Run path: {DescribeModelRunPath(classification.RunPath)}. Text: {(classification.AcceptsText ? "yes" : "not detected")}. Image: {imageText}.";
+        }
+
+        private static ModelConfigClassification ClassifyModelRunPath(string selectedFolder, string runtimePath, ModelFileKind kind)
+        {
+            List<string> evidence = new();
+            string modelDirectory = GetModelConfigDirectory(selectedFolder, runtimePath, kind);
+            ModelConfigSnapshot snapshot = ReadModelConfigSnapshot(modelDirectory);
+            evidence.AddRange(snapshot.Evidence);
+
+            if (kind == ModelFileKind.Gguf)
+            {
+                evidence.Add("GGUF file");
+                return new ModelConfigClassification(ModelRunPath.TextGeneration, true, false, false, false, evidence);
+            }
+
+            if (kind == ModelFileKind.OpenVinoCompiledBlob)
+            {
+                evidence.Add("compiled .blob file");
+                return new ModelConfigClassification(ModelRunPath.CompiledBlob, false, false, false, false, evidence);
+            }
+
+            if (snapshot.HasDiffusionModelIndex)
+            {
+                ModelRunPath diffusionPath = snapshot.ModelIndexClass.Contains("image-to-image", StringComparison.OrdinalIgnoreCase)
+                    || snapshot.ModelIndexClass.Contains("img2img", StringComparison.OrdinalIgnoreCase)
+                    ? ModelRunPath.ImageToImage
+                    : ModelRunPath.TextToImage;
+                evidence.Add(string.IsNullOrWhiteSpace(snapshot.ModelIndexClass)
+                    ? "model_index.json"
+                    : $"model_index.json {_classNameLabel(snapshot.ModelIndexClass)}");
+                return new ModelConfigClassification(diffusionPath, true, diffusionPath == ModelRunPath.ImageToImage, true, false, evidence);
+            }
+
+            if (kind == ModelFileKind.OpenVinoGenAiDirectory)
+            {
+                if (IsVisionLanguageConfig(snapshot, modelDirectory))
+                {
+                    return new ModelConfigClassification(ModelRunPath.VisionLanguage, true, true, false, true, evidence);
+                }
+
+                if (IsTextEmbeddingConfig(snapshot, modelDirectory))
+                {
+                    return new ModelConfigClassification(ModelRunPath.TextEmbedding, true, false, false, false, evidence);
+                }
+
+                return new ModelConfigClassification(ModelRunPath.TextGeneration, true, false, false, false, evidence);
+            }
+
+            if (IsVisionLanguageConfig(snapshot, modelDirectory))
+            {
+                return new ModelConfigClassification(ModelRunPath.VisionLanguage, true, true, false, true, evidence);
+            }
+
+            if (IsObjectDetectionConfig(snapshot))
+            {
+                return new ModelConfigClassification(ModelRunPath.ObjectDetection, false, true, false, true, evidence);
+            }
+
+            if (IsImageClassificationConfig(snapshot))
+            {
+                return new ModelConfigClassification(ModelRunPath.ImageClassification, false, true, false, true, evidence);
+            }
+
+            if (IsSpeechConfig(snapshot))
+            {
+                return new ModelConfigClassification(ModelRunPath.SpeechRecognition, false, false, false, false, evidence);
+            }
+
+            if (IsTextEmbeddingConfig(snapshot, modelDirectory))
+            {
+                return new ModelConfigClassification(ModelRunPath.TextEmbedding, true, false, false, false, evidence);
+            }
+
+            if (kind is ModelFileKind.OpenVinoIr or ModelFileKind.OpenVinoCoreReadable)
+            {
+                evidence.Add($"{Path.GetExtension(runtimePath).TrimStart('.')} model file");
+                return new ModelConfigClassification(ModelRunPath.OpenVinoCore, false, false, false, false, evidence);
+            }
+
+            return new ModelConfigClassification(ModelRunPath.Unknown, false, false, false, false, evidence);
+
+            static string _classNameLabel(string value) => $"class {value}";
+        }
+
+        private sealed record ModelConfigSnapshot(
+            string ModelType,
+            IReadOnlyList<string> Architectures,
+            bool HasVisionConfig,
+            bool HasTextConfig,
+            bool LanguageModelOnly,
+            bool HasDiffusionModelIndex,
+            string ModelIndexClass,
+            IReadOnlyList<string> ModelIndexKeys,
+            IReadOnlyList<string> Evidence);
+
+        private static ModelConfigSnapshot ReadModelConfigSnapshot(string modelDirectory)
+        {
+            List<string> evidence = new();
+            string modelType = string.Empty;
+            List<string> architectures = new();
+            bool hasVisionConfig = false;
+            bool hasTextConfig = false;
+            bool languageModelOnly = false;
+            bool hasDiffusionModelIndex = false;
+            string modelIndexClass = string.Empty;
+            List<string> modelIndexKeys = new();
+
+            string configPath = Path.Combine(modelDirectory, "config.json");
+            if (File.Exists(configPath))
+            {
+                try
+                {
+                    using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+                    System.Text.Json.JsonElement root = document.RootElement;
+                    modelType = TryReadJsonString(root, "model_type") ?? string.Empty;
+                    architectures.AddRange(TryReadJsonStringArray(root, "architectures"));
+                    hasVisionConfig = root.TryGetProperty("vision_config", out _);
+                    hasTextConfig = root.TryGetProperty("text_config", out _);
+                    languageModelOnly = TryReadJsonBool(root, "language_model_only") == true;
+                    if (!string.IsNullOrWhiteSpace(modelType))
+                    {
+                        evidence.Add($"config.json model_type={modelType}");
+                    }
+
+                    if (architectures.Count > 0)
+                    {
+                        evidence.Add($"config.json architectures={string.Join(",", architectures)}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    evidence.Add($"config.json unreadable: {ex.Message}");
+                }
+            }
+
+            string modelIndexPath = Path.Combine(modelDirectory, "model_index.json");
+            if (File.Exists(modelIndexPath))
+            {
+                hasDiffusionModelIndex = true;
+                try
+                {
+                    using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(modelIndexPath));
+                    System.Text.Json.JsonElement root = document.RootElement;
+                    modelIndexClass = TryReadJsonString(root, "_class_name") ?? string.Empty;
+                    modelIndexKeys.AddRange(root.EnumerateObject().Select(property => property.Name));
+                    evidence.Add(string.IsNullOrWhiteSpace(modelIndexClass)
+                        ? "model_index.json"
+                        : $"model_index.json _class_name={modelIndexClass}");
+                }
+                catch (Exception ex)
+                {
+                    evidence.Add($"model_index.json unreadable: {ex.Message}");
+                }
+            }
+
+            if (File.Exists(Path.Combine(modelDirectory, "preprocessor_config.json")))
+            {
+                evidence.Add("preprocessor_config.json");
+            }
+
+            if (File.Exists(Path.Combine(modelDirectory, "processor_config.json")))
+            {
+                evidence.Add("processor_config.json");
+            }
+
+            if (File.Exists(Path.Combine(modelDirectory, "tokenizer_config.json")))
+            {
+                evidence.Add("tokenizer_config.json");
+            }
+
+            return new ModelConfigSnapshot(
+                modelType,
+                architectures,
+                hasVisionConfig,
+                hasTextConfig,
+                languageModelOnly,
+                hasDiffusionModelIndex,
+                modelIndexClass,
+                modelIndexKeys,
+                evidence);
+        }
+
+        private static string GetModelConfigDirectory(string selectedFolder, string runtimePath, ModelFileKind kind)
+        {
+            if (kind == ModelFileKind.OpenVinoGenAiDirectory && Directory.Exists(runtimePath))
+            {
+                return runtimePath;
+            }
+
+            if (Directory.Exists(selectedFolder))
+            {
+                string mainFolder = Path.Combine(selectedFolder, "main");
+                if (File.Exists(Path.Combine(mainFolder, "config.json"))
+                    || File.Exists(Path.Combine(mainFolder, "model_index.json")))
+                {
+                    return mainFolder;
+                }
+
+                if (File.Exists(Path.Combine(selectedFolder, "config.json"))
+                    || File.Exists(Path.Combine(selectedFolder, "model_index.json")))
+                {
+                    return selectedFolder;
+                }
+            }
+
+            string? runtimeDirectory = File.Exists(runtimePath)
+                ? Path.GetDirectoryName(runtimePath)
+                : Directory.Exists(runtimePath) ? runtimePath : null;
+            return string.IsNullOrWhiteSpace(runtimeDirectory)
+                ? selectedFolder
+                : runtimeDirectory;
+        }
+
+        private static bool IsVisionLanguageConfig(ModelConfigSnapshot snapshot, string modelDirectory)
+        {
+            return HasOpenVinoVlmLanguageModel(modelDirectory)
+                || snapshot.HasVisionConfig && !snapshot.LanguageModelOnly
+                || IsVisionLanguageModelType(snapshot.ModelType)
+                || snapshot.Architectures.Any(architecture =>
+                    architecture.Contains("Vision", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("VL", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("ConditionalGeneration", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("ImageText", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsImageClassificationConfig(ModelConfigSnapshot snapshot)
+        {
+            return snapshot.Architectures.Any(architecture => architecture.Contains("ForImageClassification", StringComparison.OrdinalIgnoreCase))
+                || snapshot.ModelType.Contains("vit", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("resnet", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("swin", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("convnext", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("mobilenet", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("efficientnet", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsObjectDetectionConfig(ModelConfigSnapshot snapshot)
+        {
+            return snapshot.Architectures.Any(architecture =>
+                    architecture.Contains("ForObjectDetection", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("Detection", StringComparison.OrdinalIgnoreCase))
+                || snapshot.ModelType.Contains("detr", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("yolo", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("ssd", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSpeechConfig(ModelConfigSnapshot snapshot)
+        {
+            return snapshot.ModelType.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("wav2vec", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("speech", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("audio", StringComparison.OrdinalIgnoreCase)
+                || snapshot.Architectures.Any(architecture =>
+                    architecture.Contains("Speech", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("Audio", StringComparison.OrdinalIgnoreCase)
+                    || architecture.Contains("Whisper", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsTextEmbeddingConfig(ModelConfigSnapshot snapshot, string modelDirectory)
+        {
+            return File.Exists(Path.Combine(modelDirectory, "openvino_text_embeddings_model.xml"))
+                || snapshot.ModelType.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+                || snapshot.ModelType.Contains("sentence", StringComparison.OrdinalIgnoreCase)
+                || snapshot.Architectures.Any(architecture => architecture.Contains("Embedding", StringComparison.OrdinalIgnoreCase));
+        }
+
         private ModelCapabilityInfo DetectSelectedModelCapabilities()
         {
             try
             {
+                ModelConfigClassification classification = ClassifySelectedRuntimeModel();
+                _selectedModelRunPath = classification.RunPath;
                 return _selectedRuntimeModelKind switch
                 {
-                    ModelFileKind.OpenVinoGenAiDirectory => DetectGenAiDirectoryCapabilities(_selectedRuntimeModelPath),
+                    ModelFileKind.OpenVinoGenAiDirectory => DetectGenAiDirectoryCapabilities(_selectedRuntimeModelPath, classification),
                     ModelFileKind.Gguf => new ModelCapabilityInfo(
                         AcceptsText: true,
                         AcceptsImage: false,
                         ImageTestAvailable: false,
-                        DisplayText: "Text: yes. Image: not detected for this GGUF chat route.",
+                        DisplayText: BuildModelCapabilityDisplay(classification, loaded: true),
                         OutputLines: new[]
                         {
+                            $"Run path: {DescribeModelRunPath(classification.RunPath)}",
                             "Text: yes",
                             "Image: not detected for this GGUF chat route",
                         }),
@@ -1525,19 +2033,32 @@ namespace WorkStationC_
             }
         }
 
-        private static ModelCapabilityInfo DetectGenAiDirectoryCapabilities(string modelDirectory)
+        private static ModelCapabilityInfo DetectGenAiDirectoryCapabilities(
+            string modelDirectory,
+            ModelConfigClassification classification)
         {
-            bool looksVisionCapable = LooksLikeVisionLanguageGenAiDirectory(modelDirectory, out string evidence);
+            bool looksVisionCapable = classification.RunPath == ModelRunPath.VisionLanguage;
+            string evidence = string.Empty;
+            if (looksVisionCapable)
+            {
+                LooksLikeVisionLanguageGenAiDirectory(modelDirectory, out evidence);
+                if (string.IsNullOrWhiteSpace(evidence))
+                {
+                    evidence = classification.Evidence.FirstOrDefault() ?? "model config";
+                }
+            }
+            bool returnsImage = classification.ReturnsImage;
             string imageText = looksVisionCapable
                 ? "Image: yes. Run Image Test sends the picture and Test Text, then prints the text answer."
+                : returnsImage
+                    ? "Image: returns generated images. This app does not have that model route wired yet."
                 : "Image: not detected.";
-            string display = $"Text: yes. {imageText}";
+            string display = BuildModelCapabilityDisplay(classification, loaded: true);
             List<string> lines = new()
             {
-                "Text: yes",
-                looksVisionCapable
-                    ? "Image: model files suggest image support"
-                    : "Image: not detected",
+                $"Run path: {DescribeModelRunPath(classification.RunPath)}",
+                $"Text: {(classification.AcceptsText ? "yes" : "not detected")}",
+                imageText,
             };
 
             if (looksVisionCapable)
@@ -1550,9 +2071,9 @@ namespace WorkStationC_
             }
 
             return new ModelCapabilityInfo(
-                AcceptsText: true,
-                AcceptsImage: looksVisionCapable,
-                ImageTestAvailable: looksVisionCapable,
+                AcceptsText: classification.AcceptsText,
+                AcceptsImage: classification.AcceptsImage,
+                ImageTestAvailable: classification.ImageTestAvailable,
                 DisplayText: display,
                 OutputLines: lines);
         }
@@ -1904,7 +2425,6 @@ namespace WorkStationC_
             tabBenchmark.Enabled = modelLoaded;
             tabVisualization.Enabled = modelLoaded;
             tabConvert.Enabled = true;
-            tabLoadModel.Enabled = true;
             tabTests.Enabled = modelLoaded;
 
             if (!modelLoaded && tabMain.SelectedTab is not null && !tabMain.SelectedTab.Enabled)
@@ -1950,11 +2470,13 @@ namespace WorkStationC_
                 string[] mainFiles = GetPreferredMainRuntimeFiles(fullPath, files);
                 string[] prioritizedFiles = mainFiles.Length > 0 ? mainFiles : files;
 
-                foreach (string xmlPath in prioritizedFiles
-                    .Where(path => Path.GetFileName(path).Equals("openvino_model.xml", StringComparison.OrdinalIgnoreCase))
+                foreach (string directory in prioritizedFiles
+                    .Select(Path.GetDirectoryName)
+                    .Where(directory => !string.IsNullOrWhiteSpace(directory))
+                    .Cast<string>()
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(path => path.Length))
                 {
-                    string directory = Path.GetDirectoryName(xmlPath)!;
                     if (IsOpenVinoGenAiDirectory(directory))
                     {
                         selection = new RuntimeModelSelection(fullPath, directory, ModelFileKind.OpenVinoGenAiDirectory);
@@ -2013,9 +2535,20 @@ namespace WorkStationC_
         {
             return files
                 .Where(path => GetModelFileKind(path) == kind)
+                .Where(path => kind != ModelFileKind.OpenVinoIr || !IsOpenVinoSupportXml(path))
                 .OrderBy(path => Path.GetFileName(path).Equals("openvino_model.xml", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(path => Path.GetFileName(path).Equals("openvino_language_model.xml", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                 .ThenBy(path => path.Length)
                 .FirstOrDefault();
+        }
+
+        private static bool IsOpenVinoSupportXml(string path)
+        {
+            string fileName = Path.GetFileName(path);
+            return fileName.Equals("openvino_tokenizer.xml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("openvino_detokenizer.xml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("openvino_text_embeddings_model.xml", StringComparison.OrdinalIgnoreCase)
+                || fileName.StartsWith("openvino_vision_embeddings", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string? FindDeviceBlobForTarget(string selectedFolder, IEnumerable<string> files, string device)
@@ -2043,8 +2576,10 @@ namespace WorkStationC_
 
         private static bool IsOpenVinoGenAiDirectory(string directory)
         {
-            if (!File.Exists(Path.Combine(directory, "openvino_model.xml"))
-                || !File.Exists(Path.Combine(directory, "openvino_model.bin")))
+            bool hasLlmModel = File.Exists(Path.Combine(directory, "openvino_model.xml"))
+                && File.Exists(Path.Combine(directory, "openvino_model.bin"));
+            bool hasVlmLanguageModel = HasOpenVinoVlmLanguageModel(directory);
+            if (!hasLlmModel && !hasVlmLanguageModel)
             {
                 return false;
             }
@@ -2060,6 +2595,22 @@ namespace WorkStationC_
             return hasTokenizer && hasConfiguration;
         }
 
+        private static bool HasOpenVinoVlmLanguageModel(string directory)
+        {
+            return File.Exists(Path.Combine(directory, "openvino_language_model.xml"))
+                && File.Exists(Path.Combine(directory, "openvino_language_model.bin"));
+        }
+
+        private static bool ShouldUseVisionGenAiPipeline(ModelFileKind kind, string modelPath)
+        {
+            if (kind != ModelFileKind.OpenVinoGenAiDirectory)
+            {
+                return false;
+            }
+
+            return ClassifyModelRunPath(modelPath, modelPath, kind).RunPath == ModelRunPath.VisionLanguage;
+        }
+
         private static string DescribeRuntimeModelKind(ModelFileKind kind) => kind switch
         {
             ModelFileKind.OpenVinoGenAiDirectory => "OpenVINO GenAI model directory",
@@ -2068,6 +2619,22 @@ namespace WorkStationC_
             ModelFileKind.OpenVinoIr => "OpenVINO IR model",
             ModelFileKind.OpenVinoCoreReadable => "OpenVINO Core-readable model",
             _ => "unsupported model",
+        };
+
+        private static string DescribeModelRunPath(ModelRunPath path) => path switch
+        {
+            ModelRunPath.TextGeneration => "text generation",
+            ModelRunPath.VisionLanguage => "vision-language text generation",
+            ModelRunPath.TextToImage => "text-to-image generation",
+            ModelRunPath.ImageToImage => "image-to-image generation",
+            ModelRunPath.ImageClassification => "image classification",
+            ModelRunPath.ObjectDetection => "object detection",
+            ModelRunPath.SpeechRecognition => "speech recognition",
+            ModelRunPath.TextEmbedding => "text embeddings",
+            ModelRunPath.OpenVinoCore => "OpenVINO Core model",
+            ModelRunPath.CompiledBlob => "compiled OpenVINO model",
+            ModelRunPath.Unsupported => "unsupported",
+            _ => "unknown",
         };
 
         private void BrowseForInputImage(TextBox target)
@@ -2151,6 +2718,7 @@ namespace WorkStationC_
 
             string modelPath = _selectedRuntimeModelPath;
             AppendOutput($"Inference: resolved {DescribeRuntimeModelKind(_selectedRuntimeModelKind)}");
+            AppendOutput($"  Run path: {DescribeModelRunPath(_selectedModelRunPath)}");
             AppendOutput($"  Selected folder: {_selectedModelFolder}");
             AppendOutput($"  Runtime path: {modelPath}");
             if (!TryGetPrimaryCompileTarget(out _))
@@ -2179,8 +2747,17 @@ namespace WorkStationC_
                         await RunOpenVinoCompiledBlobInferenceAsync(modelPath, cancellationToken: cancellationToken);
                         break;
                     case ModelFileKind.Gguf:
+                        await RunGgufGenAiInferenceAsync(modelPath, true, cancellationToken);
+                        break;
                     case ModelFileKind.OpenVinoGenAiDirectory:
-                        await RunGgufGenAiInferenceAsync(modelPath, _selectedRuntimeModelKind == ModelFileKind.Gguf, cancellationToken);
+                        if (_selectedModelRunPath is not (ModelRunPath.TextGeneration or ModelRunPath.VisionLanguage))
+                        {
+                            AppendOutput($"This selected model looks like {DescribeModelRunPath(_selectedModelRunPath)}.");
+                            AppendOutput("That route is not wired to Load Model yet, so it was not sent through the chat model loader.");
+                            break;
+                        }
+
+                        await RunGgufGenAiInferenceAsync(modelPath, false, cancellationToken);
                         break;
                     default:
                         ReportUnsupportedInferenceFile(modelPath);
@@ -2359,21 +2936,30 @@ namespace WorkStationC_
             bool isGguf = true,
             CancellationToken cancellationToken = default)
         {
-            string device = GetPrimaryCompileTarget();
-            if (string.IsNullOrWhiteSpace(device))
+            if (!TryGetPrimaryCompileTarget(out string device))
             {
-                throw new InvalidOperationException("No runtime target was selected.");
+                return;
             }
 
             string prompt = string.IsNullOrWhiteSpace(txtInferText.Text)
                 ? "The purpose of OpenVINO is"
                 : txtInferText.Text.Trim();
 
+            bool useVisionPipeline = !isGguf && ShouldUseVisionGenAiPipeline(_selectedRuntimeModelKind, modelPath);
             AppendOutput(isGguf
                 ? "Chat model: loading GGUF and generating a short response"
-                : "Chat model: loading and generating a short response");
+                : useVisionPipeline
+                    ? "Image and text model: loading and generating a short response"
+                    : "Chat model: loading and generating a short response");
             AppendOutput($"  Model: {modelPath}");
             AppendOutput($"  Device: {device}");
+            AppendGenAiDeviceDetails(device);
+            AppendOutput($"  GenAI runtime: {(useVisionPipeline ? "VLMPipeline" : "LLMPipeline")}");
+            if (isGguf)
+            {
+                AppendGgufModelDetails(modelPath);
+            }
+
             AppendOutput($"  Response limit: {MaxChatResponseTokens} tokens. If the answer ends mid-sentence, the model reached this normal limit; the test did not fail.");
 
             if (!EnsureOpenVinoGenAiRuntimeAvailable(out string reason))
@@ -2390,23 +2976,304 @@ namespace WorkStationC_
                 streamedCharacters += chunk.Length;
                 SetActivityState($"Generating response... {streamedCharacters:N0} characters", allowCancel: true);
             });
-            GgufTestResult result = await Task.Run(() => RunGgufGenAiSmokeTestSafely(
+            GenAiTextRunAttempt attempt = await Task.Run(() => RunGenAiTextSmokeTestAttempt(
                 modelPath,
                 device,
                 prompt,
                 progress,
                 streamProgress,
-                cancellationToken), cancellationToken);
+                cancellationToken,
+                useVisionPipeline), cancellationToken);
+            if (attempt.Error is not null)
+            {
+                AppendGenAiLoadFailure(attempt.Error, isGguf);
+                return;
+            }
+
+            GgufTestResult result = attempt.Result
+                ?? throw new InvalidOperationException("OpenVINO GenAI did not return a result.");
             AppendOutput($"  Load time: {result.LoadMilliseconds:N0} ms");
             AppendOutput($"  Generate time: {result.GenerateMilliseconds:N0} ms");
             AppendOutput($"  Output: {TrimForOutput(result.GeneratedText, 1000)}");
             MarkSelectedRuntimeModelLoaded();
         }
 
+        private GenAiTextRunAttempt RunGenAiTextSmokeTestAttempt(
+            string modelPath,
+            string device,
+            string prompt,
+            IProgress<string>? progress,
+            IProgress<string>? streamedText,
+            CancellationToken cancellationToken,
+            bool useVisionPipeline)
+        {
+            try
+            {
+                GgufTestResult result = useVisionPipeline
+                    ? RunVlmGenAiTextSmokeTest(modelPath, device, prompt, progress, streamedText, cancellationToken)
+                    : RunGgufGenAiSmokeTest(modelPath, device, prompt, progress, streamedText, cancellationToken);
+                return new GenAiTextRunAttempt(result, null);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new GenAiTextRunAttempt(null, ex);
+            }
+        }
+
+        private void AppendGenAiLoadFailure(Exception exception, bool isGguf)
+        {
+            AppendOutput("Inference failed:");
+            AppendOutput("  OpenVINO GenAI could not run this chat model in the current runtime.");
+            foreach (string line in FormatException(exception))
+            {
+                AppendOutput($"  {line}");
+            }
+
+            if (isGguf)
+            {
+                AppendOutput("  Try a different GGUF file for this model, or use an OpenVINO model folder exported from the original Hugging Face model.");
+            }
+        }
+
+        private void AppendGgufModelDetails(string modelPath)
+        {
+            if (!TryReadGgufMetadataSummary(modelPath, out GgufMetadataSummary metadata, out string error))
+            {
+                AppendOutput($"  GGUF details: unavailable ({error})");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.Name))
+            {
+                AppendOutput($"  GGUF name: {metadata.Name}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.Architecture))
+            {
+                AppendOutput($"  GGUF model family: {metadata.Architecture}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.TokenizerModel))
+            {
+                AppendOutput($"  GGUF tokenizer: {metadata.TokenizerModel}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(metadata.SizeLabel))
+            {
+                AppendOutput($"  GGUF size label: {metadata.SizeLabel}");
+            }
+
+            if (metadata.Architecture.Equals("gemma4", StringComparison.OrdinalIgnoreCase)
+                || metadata.Architecture.Equals("gemma4_unified", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendOutput("  Note: Gemma 4 may need an OpenVINO exported model folder instead of direct GGUF loading in this runtime.");
+            }
+        }
+
+        private static bool TryReadGgufMetadataSummary(string modelPath, out GgufMetadataSummary metadata, out string error)
+        {
+            metadata = new GgufMetadataSummary(string.Empty, string.Empty, string.Empty, string.Empty);
+            error = string.Empty;
+
+            try
+            {
+                Dictionary<string, string> values = ReadGgufMetadataValues(
+                    modelPath,
+                    new[]
+                    {
+                        "general.architecture",
+                        "general.name",
+                        "general.size_label",
+                        "tokenizer.ggml.model",
+                    });
+
+                metadata = new GgufMetadataSummary(
+                    values.GetValueOrDefault("general.architecture", string.Empty),
+                    values.GetValueOrDefault("general.name", string.Empty),
+                    values.GetValueOrDefault("tokenizer.ggml.model", string.Empty),
+                    values.GetValueOrDefault("general.size_label", string.Empty));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ShortError(ex);
+                return false;
+            }
+        }
+
+        private static Dictionary<string, string> ReadGgufMetadataValues(string modelPath, IReadOnlyCollection<string> wantedKeys)
+        {
+            Dictionary<string, string> values = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> wanted = wantedKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            using FileStream stream = File.Open(modelPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using BinaryReader reader = new(stream, System.Text.Encoding.UTF8, leaveOpen: false);
+
+            string magic = new(reader.ReadChars(4));
+            if (!magic.Equals("GGUF", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("not a GGUF file.");
+            }
+
+            _ = reader.ReadUInt32();
+            _ = reader.ReadUInt64();
+            ulong metadataCount = reader.ReadUInt64();
+            for (ulong index = 0; index < metadataCount; index++)
+            {
+                string key = ReadGgufString(reader);
+                GgufValueType valueType = (GgufValueType)reader.ReadUInt32();
+                if (wanted.Contains(key))
+                {
+                    values[key] = ReadGgufValueAsText(reader, valueType);
+                    if (wanted.All(values.ContainsKey))
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    SkipGgufValue(reader, valueType);
+                }
+            }
+
+            return values;
+        }
+
+        private enum GgufValueType : uint
+        {
+            UInt8 = 0,
+            Int8 = 1,
+            UInt16 = 2,
+            Int16 = 3,
+            UInt32 = 4,
+            Int32 = 5,
+            Float32 = 6,
+            Bool = 7,
+            String = 8,
+            Array = 9,
+            UInt64 = 10,
+            Int64 = 11,
+            Float64 = 12,
+        }
+
+        private static string ReadGgufValueAsText(BinaryReader reader, GgufValueType valueType)
+        {
+            return valueType switch
+            {
+                GgufValueType.UInt8 => reader.ReadByte().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Int8 => reader.ReadSByte().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.UInt16 => reader.ReadUInt16().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Int16 => reader.ReadInt16().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.UInt32 => reader.ReadUInt32().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Int32 => reader.ReadInt32().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Float32 => reader.ReadSingle().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Bool => reader.ReadBoolean() ? "true" : "false",
+                GgufValueType.String => ReadGgufString(reader),
+                GgufValueType.UInt64 => reader.ReadUInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Int64 => reader.ReadInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Float64 => reader.ReadDouble().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                GgufValueType.Array => ReadGgufArrayPreview(reader),
+                _ => throw new InvalidDataException($"unsupported GGUF metadata value type {(uint)valueType}."),
+            };
+        }
+
+        private static string ReadGgufArrayPreview(BinaryReader reader)
+        {
+            GgufValueType elementType = (GgufValueType)reader.ReadUInt32();
+            ulong count = reader.ReadUInt64();
+            const int PreviewCount = 4;
+            List<string> preview = new();
+            for (ulong index = 0; index < count; index++)
+            {
+                if (index < PreviewCount)
+                {
+                    preview.Add(ReadGgufValueAsText(reader, elementType));
+                }
+                else
+                {
+                    SkipGgufValue(reader, elementType);
+                }
+            }
+
+            string suffix = count > PreviewCount ? ", ..." : string.Empty;
+            return $"[{string.Join(", ", preview)}{suffix}]";
+        }
+
+        private static void SkipGgufValue(BinaryReader reader, GgufValueType valueType)
+        {
+            switch (valueType)
+            {
+                case GgufValueType.UInt8:
+                case GgufValueType.Int8:
+                case GgufValueType.Bool:
+                    SkipGgufBytes(reader, 1);
+                    break;
+                case GgufValueType.UInt16:
+                case GgufValueType.Int16:
+                    SkipGgufBytes(reader, 2);
+                    break;
+                case GgufValueType.UInt32:
+                case GgufValueType.Int32:
+                case GgufValueType.Float32:
+                    SkipGgufBytes(reader, 4);
+                    break;
+                case GgufValueType.UInt64:
+                case GgufValueType.Int64:
+                case GgufValueType.Float64:
+                    SkipGgufBytes(reader, 8);
+                    break;
+                case GgufValueType.String:
+                    SkipGgufBytes(reader, reader.ReadUInt64());
+                    break;
+                case GgufValueType.Array:
+                    GgufValueType elementType = (GgufValueType)reader.ReadUInt32();
+                    ulong count = reader.ReadUInt64();
+                    for (ulong index = 0; index < count; index++)
+                    {
+                        SkipGgufValue(reader, elementType);
+                    }
+
+                    break;
+                default:
+                    throw new InvalidDataException($"unsupported GGUF metadata value type {(uint)valueType}.");
+            }
+        }
+
+        private static string ReadGgufString(BinaryReader reader)
+        {
+            ulong length = reader.ReadUInt64();
+            if (length > 1024 * 1024)
+            {
+                throw new InvalidDataException($"GGUF metadata string is too large: {length:N0} bytes.");
+            }
+
+            byte[] bytes = reader.ReadBytes((int)length);
+            if (bytes.Length != (int)length)
+            {
+                throw new EndOfStreamException("GGUF metadata ended in the middle of a string.");
+            }
+
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+
+        private static void SkipGgufBytes(BinaryReader reader, ulong byteCount)
+        {
+            if (byteCount > long.MaxValue)
+            {
+                throw new InvalidDataException($"GGUF metadata item is too large: {byteCount:N0} bytes.");
+            }
+
+            reader.BaseStream.Seek((long)byteCount, SeekOrigin.Current);
+        }
+
         private void ReportUnsupportedInferenceFile(string modelPath)
         {
             AppendOutput($"Inference: unsupported standalone model file: {modelPath}");
-            AppendOutput("  Convert lists GGUF files and can save supported GGUF models to .xml/.bin before creating a target-specific blob.");
+            AppendOutput("  Convert lists OpenVINO .xml/.bin files and creates target-specific blobs from them.");
+            AppendOutput("  Use OVMS Pull for GGUF files with --gguf_filename.");
             AppendOutput("  GenAI can run supported .gguf files directly, and it can run exported OpenVINO GenAI model directories.");
             AppendOutput("  Files like .bin, .json, .txt, .model, .safetensors, .pt, and .pth are support/source files, not standalone runtime entries.");
         }
@@ -2417,13 +3284,12 @@ namespace WorkStationC_
         }
         #endregion
 
-        #region MainForm.Workstation.cs
+        #region Workstation
         private const string PreferredLocalModelApiServerHost = "192.168.0.11";
         private const string LocalModelApiServerBindAddress = "0.0.0.0";
         private const int LocalModelApiServerPort = 11434;
         private const int DownloadShortcutCount = 12;
         private const string WorkbenchConfigFileName = "workbench.cfg";
-        private const string LegacyModelRootConfigFileName = "model-root.txt";
         private static string LocalModelApiServerBaseUrl => $"http://{GetLocalModelApiServerAdvertisedHost()}:{LocalModelApiServerPort}";
 
         private sealed class WorkbenchConfig
@@ -3067,6 +3933,7 @@ namespace WorkStationC_
                     AppendOutput("  Model was selected by the server request and loaded for this run.");
                 }
                 AppendOutput($"  Target: {context.Device}");
+                AppendGenAiDeviceDetails(context.Device);
                 AppendOutput($"  Prompt: {TrimForOutput(request.Prompt, 500)}");
                 AppendOutput($"  Response limit: {request.MaxTokens:N0} tokens");
                 if (request.HasTools)
@@ -3087,14 +3954,17 @@ namespace WorkStationC_
                     SetActivityState($"Server chat: {streamedCharacters:N0} characters", allowCancel: true);
                 });
 
-                GgufTestResult result = await Task.Run(() => RunGgufGenAiSmokeTestSafely(
+                GgufTestResult result = await Task.Run(() => RunGenAiTextSmokeTestSafely(
                     targetModel.RuntimePath,
                     context.Device,
                     request.Prompt,
                     progress,
                     streamProgress,
                     cancellationToken,
-                    maxNewTokens: (ulong)request.MaxTokens), cancellationToken);
+                    ShouldUseVisionGenAiPipeline(targetModel.Kind, targetModel.RuntimePath),
+                    maxNewTokens: (ulong)request.MaxTokens,
+                    enableThinking: request.EnableThinking,
+                    preserveThinking: request.PreserveThinking), cancellationToken);
 
                 AppendOutput($"  Generate time: {result.GenerateMilliseconds:N0} ms");
                 AppendOutput($"  Output: {TrimForOutput(result.GeneratedText, 1000)}");
@@ -3245,7 +4115,7 @@ namespace WorkStationC_
             }
 
             if (_longOperationCancellation is not null
-                && (_cachedGenAiPipeline is not null || _cachedVlmPipeline is not null))
+                && HasCachedGenAiPipeline())
             {
                 _pendingRuntimeModelRefresh = true;
                 AppendOutput("Runtime target change will apply after the current task finishes.");
@@ -3253,9 +4123,9 @@ namespace WorkStationC_
             }
 
             bool cachedTextDeviceChanged = _cachedGenAiPipeline is not null
-                && !string.Equals(_cachedGenAiDevice, device, StringComparison.OrdinalIgnoreCase);
+                && !string.Equals(_cachedGenAiDevice, BuildGenAiDeviceSettings(device).CacheKey, StringComparison.OrdinalIgnoreCase);
             bool cachedVisionDeviceChanged = _cachedVlmPipeline is not null
-                && !string.Equals(_cachedVlmDevice, device, StringComparison.OrdinalIgnoreCase);
+                && !string.Equals(_cachedVlmDevice, BuildGenAiDeviceSettings(device).CacheKey, StringComparison.OrdinalIgnoreCase);
             if (cachedTextDeviceChanged || cachedVisionDeviceChanged)
             {
                 DisposeCachedGenAiPipeline();
@@ -3283,7 +4153,6 @@ namespace WorkStationC_
             txtModelRoot.Text = modelRoot;
             EnsureModelRootFolders(modelRoot);
             SaveModelRoot(modelRoot);
-            ApplyModelRootDefaults(modelRoot);
         }
 
         private void btnBrowseModelRoot_Click(object sender, EventArgs e)
@@ -3313,10 +4182,9 @@ namespace WorkStationC_
                 EnsureModelRootFolders(modelRoot);
                 SaveModelRoot(modelRoot);
                 txtModelRoot.Text = modelRoot;
-                ApplyModelRootDefaults(modelRoot);
                 AppendOutput($"Main model folder: {modelRoot}");
                 AppendOutput("  Created/verified main folder.");
-                RefreshOptimumSourceModels();
+                RefreshConvertModelSelection();
             }
             catch (Exception ex)
             {
@@ -3349,24 +4217,9 @@ namespace WorkStationC_
             return Path.Combine(baseFolder, "OpenVINO Workbench Models");
         }
 
-        private void ApplyModelRootDefaults(string modelRoot)
-        {
-            _ = NormalizeModelRoot(modelRoot);
-        }
-
-        private static string GetModelRootConfigPath()
-        {
-            return GetWorkbenchConfigPath();
-        }
-
         private static string GetWorkbenchConfigPath()
         {
             return Path.Combine(GetProjectDirectory(), WorkbenchConfigFileName);
-        }
-
-        private static string GetLegacyModelRootConfigPath()
-        {
-            return Path.Combine(GetProjectDirectory(), LegacyModelRootConfigFileName);
         }
 
         private static string NormalizeModelRoot(string modelRoot)
@@ -3439,18 +4292,6 @@ namespace WorkStationC_
                     string key = line[..separatorIndex].Trim();
                     string value = line[(separatorIndex + 1)..].Trim();
                     ApplyWorkbenchConfigValue(config, key, value);
-                }
-            }
-            else
-            {
-                string legacyPath = GetLegacyModelRootConfigPath();
-                if (File.Exists(legacyPath))
-                {
-                    string legacyModelRoot = File.ReadAllText(legacyPath).Trim();
-                    if (!string.IsNullOrWhiteSpace(legacyModelRoot))
-                    {
-                        config.ModelRoot = legacyModelRoot;
-                    }
                 }
             }
 
@@ -3591,6 +4432,43 @@ namespace WorkStationC_
 
             AppendOutput("Choose a runtime target on Workstation first. If the list is empty, click Check Workstation.");
             return false;
+        }
+
+        private static GenAiDeviceSettings BuildGenAiDeviceSettings(string target)
+        {
+            string trimmed = target.Trim();
+            if (!IsOpenVinoMultiTarget(trimmed))
+            {
+                return new GenAiDeviceSettings(trimmed, trimmed, new Dictionary<string, string>());
+            }
+
+            string devicePriorities = string.Join(
+                ",",
+                trimmed["MULTI:".Length..]
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(device => !string.IsNullOrWhiteSpace(device))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(devicePriorities))
+            {
+                return new GenAiDeviceSettings(trimmed, trimmed, new Dictionary<string, string>());
+            }
+
+            return new GenAiDeviceSettings(
+                DisplayDevice: trimmed,
+                PipelineDevice: $"HETERO:{devicePriorities}",
+                Properties: new Dictionary<string, string>
+                {
+                    ["MODEL_DISTRIBUTION_POLICY"] = "PIPELINE_PARALLEL",
+                });
+        }
+
+        private void AppendGenAiDeviceDetails(string target)
+        {
+            GenAiDeviceSettings settings = BuildGenAiDeviceSettings(target);
+            if (!string.Equals(settings.DisplayDevice, settings.PipelineDevice, StringComparison.OrdinalIgnoreCase))
+            {
+                AppendOutput($"  OpenVINO GenAI target: split this model across {settings.PipelineDevice["HETERO:".Length..]}");
+            }
         }
 
         private void UpdateCompileTargetChoices(IEnumerable<string> targets)
@@ -4454,7 +5332,7 @@ namespace WorkStationC_
         }
         #endregion
 
-        #region MainForm.Downloads.cs
+        #region Downloads
         private enum ModelCatalogSource
         {
             HuggingFace,
@@ -4521,6 +5399,8 @@ namespace WorkStationC_
                 return IsFolder ? $"[Folder] {Path}" : Path;
             }
         }
+
+        private sealed record DownloadFileResult(string TargetPath, bool Skipped);
 
         private sealed class ModelWebsiteEntry
         {
@@ -4599,19 +5479,19 @@ namespace WorkStationC_
         {
             InitializeDownloadShortcutSlotPicker();
             LoadDownloadShortcutButtons();
-            InitializeOptimumIntelTab();
+            InitializeOvmsPullTab();
             RefreshConvertModelSelection();
         }
 
-        private void btnPresetHuggingFace_Click(object? sender, EventArgs e) => OpenDownloadShortcut(0);
-        private void btnPresetOpenVino_Click(object? sender, EventArgs e) => OpenDownloadShortcut(1);
-        private void btnPresetIntel_Click(object? sender, EventArgs e) => OpenDownloadShortcut(2);
-        private void btnPresetUltralytics_Click(object? sender, EventArgs e) => OpenDownloadShortcut(3);
-        private void btnPresetOllama_Click(object? sender, EventArgs e) => OpenDownloadShortcut(4);
-        private void btnOfficialFiles_Click(object? sender, EventArgs e) => OpenDownloadShortcut(5);
-        private void btnRefreshOfficialIndex_Click(object? sender, EventArgs e) => OpenDownloadShortcut(6);
-        private void btnSearchRepos_Click(object? sender, EventArgs e) => OpenDownloadShortcut(10);
-        private void btnSearchAllModels_Click(object? sender, EventArgs e) => OpenDownloadShortcut(11);
+        private void btnPresetHuggingFace_Click(object? sender, EventArgs e) => UseDownloadShortcut(0);
+        private void btnPresetOpenVino_Click(object? sender, EventArgs e) => UseDownloadShortcut(1);
+        private void btnPresetIntel_Click(object? sender, EventArgs e) => UseDownloadShortcut(2);
+        private void btnPresetUltralytics_Click(object? sender, EventArgs e) => UseDownloadShortcut(3);
+        private void btnPresetOllama_Click(object? sender, EventArgs e) => UseDownloadShortcut(4);
+        private void btnOfficialFiles_Click(object? sender, EventArgs e) => UseDownloadShortcut(5);
+        private void btnRefreshOfficialIndex_Click(object? sender, EventArgs e) => UseDownloadShortcut(6);
+        private void btnSearchRepos_Click(object? sender, EventArgs e) => UseDownloadShortcut(10);
+        private void btnSearchAllModels_Click(object? sender, EventArgs e) => UseDownloadShortcut(11);
         private async void btnFindDownloadAddress_Click(object? sender, EventArgs e) => await FindDownloadAddressAsync();
         private async void btnLoadFiles_Click(object? sender, EventArgs e) => await DownloadFromWebAddressAsync();
         private void btnSaveFavoriteSite_Click(object? sender, EventArgs e) => SaveDownloadShortcutFromFields(GetSelectedDownloadShortcutIndex());
@@ -4684,27 +5564,27 @@ namespace WorkStationC_
             };
         }
 
-        private void OpenDownloadShortcut(int shortcutIndex)
+        private void UseDownloadShortcut(int shortcutIndex)
         {
             IReadOnlyList<DownloadShortcutConfig> shortcuts = GetDownloadShortcutConfigs();
             if (shortcutIndex < 0 || shortcutIndex >= shortcuts.Count)
             {
-                AppendOutput("Downloads: that saved site button is not available.");
+                AppendOutput("Downloads: that saved address button is not available.");
                 return;
             }
 
             DownloadShortcutConfig shortcut = shortcuts[shortcutIndex];
             if (string.IsNullOrWhiteSpace(shortcut.Url))
             {
-                AppendOutput($"Downloads: set Site {shortcutIndex + 1} before opening it.");
+                AppendOutput($"Downloads: save an address to Site {shortcutIndex + 1} before using it.");
                 return;
             }
 
             txtDownloadUrl.Text = shortcut.Url;
             txtHfQuery.Text = shortcut.Label;
-            OpenModelCatalogWebsite(
-                string.IsNullOrWhiteSpace(shortcut.Label) ? $"Site {shortcutIndex + 1}" : shortcut.Label,
-                shortcut.Url);
+            txtDownloadUrl.Focus();
+            txtDownloadUrl.SelectAll();
+            AppendOutput($"Downloads: filled Web Address from Site {shortcutIndex + 1}.");
         }
 
         private void SaveDownloadShortcutFromFields(int shortcutIndex)
@@ -4725,7 +5605,7 @@ namespace WorkStationC_
 
             SaveDownloadShortcutConfig(shortcutIndex, label, uri.AbsoluteUri);
             LoadDownloadShortcutButtons();
-            AppendOutput($"Downloads: saved Site {shortcutIndex + 1} as {label}: {uri.AbsoluteUri}");
+            AppendOutput($"Downloads: saved address to Site {shortcutIndex + 1}: {label}: {uri.AbsoluteUri}");
         }
 
         private int GetSelectedDownloadShortcutIndex()
@@ -4786,28 +5666,11 @@ namespace WorkStationC_
                 : uri.Host;
         }
 
-        private void btnOpenModelWebsite_Click(object? sender, EventArgs e) => OpenDownloadShortcut(7);
+        private void btnOpenModelWebsite_Click(object? sender, EventArgs e) => UseDownloadShortcut(7);
 
-        private void btnAddModelWebsite_Click(object? sender, EventArgs e) => OpenDownloadShortcut(8);
+        private void btnAddModelWebsite_Click(object? sender, EventArgs e) => UseDownloadShortcut(8);
 
-        private void btnDeleteModelWebsite_Click(object? sender, EventArgs e) => OpenDownloadShortcut(9);
-
-        private void OpenModelCatalogWebsite(string name, string url)
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = url,
-                    UseShellExecute = true,
-                });
-                AppendOutput($"Models: opened {name} in your browser: {url}");
-            }
-            catch (Exception ex)
-            {
-                AppendOutput($"Models: could not open {name}: {ShortError(ex)}");
-            }
-        }
+        private void btnDeleteModelWebsite_Click(object? sender, EventArgs e) => UseDownloadShortcut(9);
 
         private void LoadModelWebsites()
         {
@@ -5059,7 +5922,6 @@ namespace WorkStationC_
             {
                 Directory.Delete(downloadFolder, recursive: true);
                 lstHfFiles.Items.Clear();
-                RefreshOptimumSourceModels();
                 RefreshConvertModelSelection();
                 AppendOutput($"Delete download: removed {downloadFolder}");
             }
@@ -5220,7 +6082,7 @@ namespace WorkStationC_
 
                 SelectFirstModelCatalogItem();
                 AppendOutput($"Models: found {distinctItems.Count} result(s) across searchable sources.");
-                AppendOutput("Models: Kaggle, Models.dev, and general website shortcuts are still opened in the browser because they do not share a simple downloadable file-list API in this app.");
+                AppendOutput("Models: Kaggle, Models.dev, and general websites are not searched here because they do not share a simple downloadable file-list API in this app.");
             }
             catch (OperationCanceledException) when (!IsCurrentModelCatalogRequest(requestId, cancellationToken))
             {
@@ -6096,17 +6958,18 @@ namespace WorkStationC_
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     string progressLabel = $"{index + 1}/{files.Count} {files[index]}";
-                    string targetPath = await DownloadModelFileAsync(
+                    DownloadFileResult result = await DownloadModelFileAsync(
                         address.RepoId,
                         files[index],
                         address.Revision,
                         progressLabel,
                         cancellationToken);
-                    AppendOutput($"Downloads: downloaded {files[index]} to {targetPath}");
+                    AppendOutput(result.Skipped
+                        ? $"Downloads: skipped {files[index]}; existing file is already complete."
+                        : $"Downloads: downloaded {files[index]} to {result.TargetPath}");
                 }
 
                 txtInferModel.Text = Path.Combine(GetModelRoot(), GetHuggingFaceModelFolderName(address.RepoId));
-                RefreshOptimumSourceModels();
                 RefreshConvertModelSelection();
                 ClearDownloadProgress();
                 AppendOutput(files.Count == 1 ? "Downloads: file download complete." : "Downloads: model download complete.");
@@ -6162,6 +7025,16 @@ namespace WorkStationC_
                     response.EnsureSuccessStatusCode();
                     long? totalBytes = response.Content.Headers.ContentLength;
 
+                    if (IsExistingFileSameSize(targetPath, totalBytes))
+                    {
+                        UpdateDownloadProgress(fileName, totalBytes!.Value, totalBytes, TimeSpan.Zero);
+                        txtInferModel.Text = Path.GetDirectoryName(Path.GetDirectoryName(targetPath) ?? targetPath) ?? targetPath;
+                        RefreshConvertModelSelection();
+                        ClearDownloadProgress();
+                        AppendOutput($"Downloads: skipped {fileName}; existing file is already complete.");
+                        return;
+                    }
+
                     string? targetDirectory = Path.GetDirectoryName(targetPath);
                     if (!string.IsNullOrWhiteSpace(targetDirectory))
                     {
@@ -6201,7 +7074,6 @@ namespace WorkStationC_
                     File.Move(temporaryPath, targetPath, overwrite: true);
                     UpdateDownloadProgress(fileName, downloadedBytes, totalBytes, stopwatch.Elapsed);
                     txtInferModel.Text = Path.GetDirectoryName(Path.GetDirectoryName(targetPath) ?? targetPath) ?? targetPath;
-                    RefreshOptimumSourceModels();
                     RefreshConvertModelSelection();
                     ClearDownloadProgress();
                     AppendOutput($"Downloads: file download complete: {targetPath}");
@@ -6298,8 +7170,10 @@ namespace WorkStationC_
                 for (int index = 0; index < files.Count; index++)
                 {
                     string progressLabel = $"{index + 1}/{files.Count} {files[index]}";
-                    string targetPath = await DownloadModelFileAsync(repoId, files[index], revision, progressLabel, cancellationToken);
-                    AppendOutput($"Models: downloaded {files[index]} to {targetPath}");
+                    DownloadFileResult result = await DownloadModelFileAsync(repoId, files[index], revision, progressLabel, cancellationToken);
+                    AppendOutput(result.Skipped
+                        ? $"Models: skipped {files[index]}; existing file is already complete."
+                        : $"Models: downloaded {files[index]} to {result.TargetPath}");
                 }
 
                 AppendOutput(files.Count == 1 ? "Models: file download complete." : "Models: model download complete.");
@@ -6482,6 +7356,13 @@ namespace WorkStationC_
 
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
                 ValidateDownloadDestination(targetPath);
+
+                if (File.Exists(targetPath) && FileMatchesOllamaDigest(targetPath, digest))
+                {
+                    UpdateDownloadProgress(progressLabel, totalBytes ?? new FileInfo(targetPath).Length, totalBytes, TimeSpan.Zero);
+                    AppendOutput($"Models: skipped {Path.GetFileName(targetPath)}; existing blob is already complete.");
+                    return;
+                }
 
                 long downloadedBytes = 0;
                 System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -6687,7 +7568,7 @@ namespace WorkStationC_
                 }
                 else
                 {
-                    AppendOutput("Prepare: no OpenVINO-readable model file found. GGUF models are handled on Convert when they are under the model root.");
+                    AppendOutput("Prepare: no OpenVINO-readable model file found. GGUF files belong in OVMS Pull or the OpenVINO GenAI runtime path.");
                 }
 
                 RefreshConvertModelSelection(convertEntry?.Id);
@@ -6836,7 +7717,7 @@ namespace WorkStationC_
             return Path.GetExtension(path).Equals(".gguf", StringComparison.OrdinalIgnoreCase);
         }
 
-        private async Task<string> DownloadModelFileAsync(string repoId, string fileName, string revision, string progressLabel, CancellationToken cancellationToken)
+        private async Task<DownloadFileResult> DownloadModelFileAsync(string repoId, string fileName, string revision, string progressLabel, CancellationToken cancellationToken)
         {
             string downloadUrl = BuildModelFileDownloadUrl(repoId, fileName, revision);
             string targetPath = BuildModelFileDownloadPath(repoId, fileName, revision);
@@ -6859,6 +7740,12 @@ namespace WorkStationC_
                 {
                     Directory.CreateDirectory(targetDirectory);
                     ValidateDownloadDestination(targetPath);
+                }
+
+                if (IsExistingFileSameSize(targetPath, totalBytes))
+                {
+                    UpdateDownloadProgress(progressLabel, totalBytes!.Value, totalBytes, TimeSpan.Zero);
+                    return new DownloadFileResult(targetPath, Skipped: true);
                 }
 
                 long downloadedBytes = 0;
@@ -6892,7 +7779,7 @@ namespace WorkStationC_
                 AppendDownloadedFileValidation(temporaryPath);
                 File.Move(temporaryPath, targetPath, overwrite: true);
                 UpdateDownloadProgress(progressLabel, downloadedBytes, totalBytes, stopwatch.Elapsed);
-                return targetPath;
+                return new DownloadFileResult(targetPath, Skipped: false);
             }
             catch (Exception downloadException)
             {
@@ -6913,6 +7800,14 @@ namespace WorkStationC_
 
                 throw;
             }
+        }
+
+        private static bool IsExistingFileSameSize(string targetPath, long? expectedBytes)
+        {
+            return expectedBytes.HasValue
+                && expectedBytes.Value >= 0
+                && File.Exists(targetPath)
+                && new FileInfo(targetPath).Length == expectedBytes.Value;
         }
 
         private void AppendDownloadedFileValidation(string targetPath)
@@ -7466,12 +8361,12 @@ namespace WorkStationC_
             AppendOutput(".mlmodel: Apple Core ML model. Useful on Apple platforms, but not a direct runtime model for this Windows/OpenVINO app.");
             AppendOutput("Why choose .xml/.bin instead of .gguf?");
             AppendOutput("  Choose .xml/.bin or a converted blob when you want the normal OpenVINO runtime path, model inspection, image/classification models, generic benchmarking, or the most control over GPU compilation.");
-            AppendOutput("  Choose .gguf when you mainly want a text chat model and accept the GenAI GGUF route. The Convert tab can save supported GGUF models to .xml/.bin and can then create a target-specific .blob.");
+            AppendOutput("  Choose .gguf when you mainly want a text chat model and accept the GenAI GGUF route. Use OVMS Pull with --gguf_filename for direct Hugging Face GGUF pulls.");
             AppendOutput("Intel Arc Pro B70 GPU notes");
             AppendOutput("  The file extension does not directly choose special GPU registers. OpenVINO chooses GPU kernels and hardware features after you compile or load the model for a GPU target.");
             AppendOutput("  Intel Arc Pro B70 is an Xe2 GPU with Intel XMX engines and OpenVINO support. To give OpenVINO the best chance to use those GPU features, use an OpenVINO IR model or a GPU-targeted blob, select GPU.0, GPU.1, GPU.2, or MULTI on Workstation, then load or benchmark it.");
             AppendOutput("  GGUF can still run on Intel GPU through OpenVINO GenAI for supported LLMs, but it is the less general path and may not expose the same conversion, inspection, or benchmark controls.");
-            AppendOutput("Rule of thumb: for Arc Pro B70 testing, use supported GGUF models through GenAI when you want a text chat model. Use Convert when you want to save .xml/.bin and optionally create a GPU-targeted blob from that saved IR.");
+            AppendOutput("Rule of thumb: for Arc Pro B70 testing, use supported GGUF models through GenAI when you want a text chat model. Use Convert only when you already have OpenVINO .xml/.bin and want a GPU-targeted blob.");
             AppendOutput(string.Empty);
         }
 
@@ -7593,851 +8488,59 @@ namespace WorkStationC_
         }
         #endregion
 
-        #region MainForm.OptimumIntel.cs
-        private sealed class OptimumSourceModelEntry
+        #region Shared conversion
+        private static string? TryReadJsonString(System.Text.Json.JsonElement element, string propertyName)
         {
-            public required string Id { get; init; }
-            public required string DisplayName { get; init; }
-            public required string SourcePath { get; init; }
-            public required string ModelFolder { get; init; }
-            public required string OutputMainFolder { get; init; }
-
-            public override string ToString() => DisplayName;
+            return element.TryGetProperty(propertyName, out System.Text.Json.JsonElement property)
+                && property.ValueKind == System.Text.Json.JsonValueKind.String
+                ? property.GetString()
+                : null;
         }
 
-        private sealed class OptimumExportPlan
+        private static bool? TryReadJsonBool(System.Text.Json.JsonElement element, string propertyName)
         {
-            public required string SourceForCli { get; init; }
-            public required string ModelFolder { get; init; }
-            public required string OutputMainFolder { get; init; }
-            public required string TemporaryOutputFolder { get; init; }
-            public required string DisplayName { get; init; }
-            public bool SourceIsLocalFolder { get; init; }
+            return element.TryGetProperty(propertyName, out System.Text.Json.JsonElement property)
+                && (property.ValueKind == System.Text.Json.JsonValueKind.True || property.ValueKind == System.Text.Json.JsonValueKind.False)
+                ? property.GetBoolean()
+                : null;
         }
 
-        private enum OptimumProcessArgumentStyle
+        private static IReadOnlyList<string> TryReadJsonStringArray(System.Text.Json.JsonElement element, string propertyName)
         {
-            BundledExporter,
-            OptimumCli,
-        }
-
-        private sealed class OptimumProcessCandidate
-        {
-            public required string FileName { get; init; }
-            public IReadOnlyList<string> PrefixArguments { get; init; } = Array.Empty<string>();
-            public required string DisplayName { get; init; }
-            public OptimumProcessArgumentStyle ArgumentStyle { get; init; } = OptimumProcessArgumentStyle.OptimumCli;
-            public string? WorkingDirectory { get; init; }
-        }
-
-        private sealed class OptimumProcessResult
-        {
-            public int ExitCode { get; init; }
-            public string CombinedOutput { get; init; } = string.Empty;
-        }
-
-        private void InitializeOptimumIntelTab()
-        {
-            if (cboOptimumTask.SelectedIndex < 0 && cboOptimumTask.Items.Count > 0)
+            if (!element.TryGetProperty(propertyName, out System.Text.Json.JsonElement property)
+                || property.ValueKind != System.Text.Json.JsonValueKind.Array)
             {
-                cboOptimumTask.SelectedIndex = 0;
+                return Array.Empty<string>();
             }
 
-            if (cboOptimumWeightFormat.SelectedIndex < 0 && cboOptimumWeightFormat.Items.Count > 0)
-            {
-                cboOptimumWeightFormat.SelectedIndex = 0;
-            }
-
-            RefreshOptimumSourceModels();
-        }
-
-        private void btnRefreshOptimumModels_Click(object? sender, EventArgs e) => RefreshOptimumSourceModels(reportStatus: true);
-        private void cboOptimumSourceModel_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOptimumIntelStatus();
-        private void cboOptimumTask_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOptimumIntelStatus();
-        private void cboOptimumWeightFormat_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOptimumIntelStatus();
-        private void chkOptimumTrustRemoteCode_CheckedChanged(object? sender, EventArgs e) => UpdateOptimumIntelStatus();
-        private void chkOptimumCreateBlob_CheckedChanged(object? sender, EventArgs e) => UpdateOptimumIntelStatus();
-        private async void btnRunOptimumExport_Click(object? sender, EventArgs e) => await RunOptimumIntelExportAsync();
-
-        private void RefreshOptimumSourceModels(string? selectedId = null, bool reportStatus = false)
-        {
-            string previousText = cboOptimumSourceModel.Text.Trim();
-            List<OptimumSourceModelEntry> entries;
-            try
-            {
-                entries = EnumerateOptimumSourceModels()
-                    .OrderBy(entry => entry.DisplayName, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-            catch (Exception ex)
-            {
-                AppendOutput($"Optimum Intel: model list could not be read: {ShortError(ex)}");
-                return;
-            }
-
-            cboOptimumSourceModel.Items.Clear();
-            foreach (OptimumSourceModelEntry entry in entries)
-            {
-                cboOptimumSourceModel.Items.Add(entry);
-            }
-
-            int selectedIndex = -1;
-            if (!string.IsNullOrWhiteSpace(selectedId))
-            {
-                selectedIndex = entries.FindIndex(entry => entry.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase));
-            }
-            else if (!string.IsNullOrWhiteSpace(previousText))
-            {
-                selectedIndex = entries.FindIndex(entry => entry.SourcePath.Equals(previousText, StringComparison.OrdinalIgnoreCase)
-                    || entry.DisplayName.Equals(previousText, StringComparison.OrdinalIgnoreCase));
-            }
-
-            if (selectedIndex >= 0)
-            {
-                cboOptimumSourceModel.SelectedIndex = selectedIndex;
-            }
-            else if (entries.Count > 0 && string.IsNullOrWhiteSpace(previousText))
-            {
-                cboOptimumSourceModel.SelectedIndex = 0;
-            }
-            else
-            {
-                cboOptimumSourceModel.Text = previousText;
-            }
-
-            if (reportStatus)
-            {
-                AppendOutput($"Optimum Intel: found {entries.Count:N0} source model folder(s).");
-            }
-
-            UpdateOptimumIntelStatus();
-        }
-
-        private static IEnumerable<OptimumSourceModelEntry> EnumerateOptimumSourceModels()
-        {
-            string modelRoot = Path.GetFullPath(GetModelRoot());
-            if (!Directory.Exists(modelRoot))
-            {
-                yield break;
-            }
-
-            foreach (string modelFolder in Directory.EnumerateDirectories(modelRoot, "*", SearchOption.TopDirectoryOnly))
-            {
-                DirectoryInfo info = new(modelFolder);
-                if (IsReservedModelRootFolder(info.Name))
-                {
-                    continue;
-                }
-
-                string mainFolder = Path.Combine(modelFolder, "main");
-                string sourceFolder = Directory.Exists(mainFolder) ? mainFolder : modelFolder;
-                if (!IsOptimumSourceFolder(sourceFolder))
-                {
-                    continue;
-                }
-
-                yield return new OptimumSourceModelEntry
-                {
-                    Id = $"optimum:{info.Name}",
-                    DisplayName = $"{info.Name} - {Path.GetFileName(sourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}",
-                    SourcePath = Path.GetFullPath(sourceFolder),
-                    ModelFolder = Path.GetFullPath(modelFolder),
-                    OutputMainFolder = Path.GetFullPath(mainFolder),
-                };
-            }
-        }
-
-        private static bool IsOptimumSourceFolder(string folder)
-        {
-            if (!Directory.Exists(folder) || !File.Exists(Path.Combine(folder, "config.json")))
-            {
-                return false;
-            }
-
-            if (IsOpenVinoGenAiDirectory(folder))
-            {
-                return false;
-            }
-
-            return Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
-                .Any(IsOptimumSourceWeightFile);
-        }
-
-        private static bool IsOptimumSourceWeightFile(string path)
-        {
-            string extension = Path.GetExtension(path).ToLowerInvariant();
-            string fileName = Path.GetFileName(path);
-            if (extension is ".safetensors" or ".pt" or ".pth" or ".ckpt")
-            {
-                return true;
-            }
-
-            return extension == ".bin"
-                && !fileName.StartsWith("openvino_", StringComparison.OrdinalIgnoreCase)
-                && !fileName.Equals("openvino_model.bin", StringComparison.OrdinalIgnoreCase)
-                && !fileName.Equals("openvino_language_model.bin", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private void UpdateOptimumIntelStatus()
-        {
-            bool hasSource = !string.IsNullOrWhiteSpace(GetOptimumSourceText());
-            btnRunOptimumExport.Enabled = hasSource;
-
-            if (cboOptimumSourceModel.SelectedItem is OptimumSourceModelEntry entry)
-            {
-                lblOptimumStatus.Text = $"Ready: {entry.SourcePath}";
-                return;
-            }
-
-            lblOptimumStatus.Text = hasSource
-                ? "Ready to export the typed model ID or folder."
-                : "Choose a downloaded Hugging Face source model, then export it to OpenVINO.";
-        }
-
-        private string GetOptimumSourceText()
-        {
-            return cboOptimumSourceModel.SelectedItem is OptimumSourceModelEntry entry
-                ? entry.SourcePath
-                : cboOptimumSourceModel.Text.Trim();
-        }
-
-        private async Task RunOptimumIntelExportAsync()
-        {
-            string sourceText = GetOptimumSourceText();
-            if (string.IsNullOrWhiteSpace(sourceText))
-            {
-                AppendOutput("Optimum Intel: choose a source model first.");
-                return;
-            }
-
-            string device = GetPrimaryCompileTarget();
-            if (chkOptimumCreateBlob.Checked && !TryGetPrimaryCompileTarget(out device))
-            {
-                return;
-            }
-
-            CancellationTokenSource? operation = await TryBeginLongOperationAsync("Exporting with Optimum Intel...", allowCancel: true);
-            if (operation is null)
-            {
-                return;
-            }
-
-            CancellationToken cancellationToken = operation.Token;
-            btnRunOptimumExport.Enabled = false;
-            string oldStatus = lblOptimumStatus.Text;
-            string? temporaryOutputFolder = null;
-
-            try
-            {
-                OptimumExportPlan plan = BuildOptimumExportPlan(sourceText);
-                temporaryOutputFolder = plan.TemporaryOutputFolder;
-                Directory.CreateDirectory(plan.ModelFolder);
-
-                AppendOutput("Optimum Intel export");
-                AppendOutput($"  Source: {plan.SourceForCli}");
-                AppendOutput($"  Destination: {plan.OutputMainFolder}");
-                AppendOutput($"  Task: {cboOptimumTask.Text}");
-                AppendOutput($"  Weights: {cboOptimumWeightFormat.Text}");
-                if (chkOptimumTrustRemoteCode.Checked)
-                {
-                    AppendOutput("  Model code: allowed for this export.");
-                }
-
-                AppendOptimumIntelPreflightNotes(plan);
-
-                if (plan.SourceIsLocalFolder && !IsOptimumSourceFolder(plan.SourceForCli))
-                {
-                    AppendOutput("  Note: no Hugging Face source weights were detected in this folder. Optimum may report that it cannot export it.");
-                }
-
-                SetActivityState("Running Optimum Intel export...", allowCancel: true);
-                System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                await RunOptimumExportProcessAsync(plan.SourceForCli, temporaryOutputFolder, cancellationToken);
-                stopwatch.Stop();
-                cancellationToken.ThrowIfCancellationRequested();
-
-                string? primaryXml = FindPrimaryOptimumIrXml(temporaryOutputFolder);
-                if (primaryXml is null)
-                {
-                    throw new InvalidOperationException("Optimum Intel finished, but no OpenVINO .xml model file was found in the export folder.");
-                }
-
-                SetActivityState("Copying exported OpenVINO files...", allowCancel: true);
-                Progress<string> copyProgress = new(message => SetActivityState(message, allowCancel: true));
-                await Task.Run(() => CopyDirectory(temporaryOutputFolder, plan.OutputMainFolder, cancellationToken, copyProgress), cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-
-                string outputPrimaryXml = Path.Combine(plan.OutputMainFolder, Path.GetRelativePath(temporaryOutputFolder, primaryXml));
-                IReadOnlyList<string> outputFiles = Directory
-                    .EnumerateFiles(temporaryOutputFolder, "*", SearchOption.AllDirectories)
-                    .Select(path => Path.Combine(plan.OutputMainFolder, Path.GetRelativePath(temporaryOutputFolder, path)))
-                    .Where(File.Exists)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                WriteOptimumExportManifest(plan.OutputMainFolder, plan.SourceForCli, outputFiles, stopwatch.ElapsedMilliseconds);
-                PrepareDownloadedModel(plan.DisplayName, "optimum", plan.OutputMainFolder);
-
-                AppendOutput($"  Primary XML: {outputPrimaryXml}");
-                string? primaryBin = FindMatchingBinPath(outputPrimaryXml);
-                if (!string.IsNullOrWhiteSpace(primaryBin))
-                {
-                    AppendOutput($"  Primary BIN: {primaryBin}");
-                }
-
-                AppendOutput($"  Export time: {stopwatch.ElapsedMilliseconds:N0} ms");
-                AppendOutput($"  Files written: {outputFiles.Count:N0}");
-                txtInferModel.Text = plan.ModelFolder;
-                lblOptimumStatus.Text = $"Export complete: {plan.OutputMainFolder}";
-                AppendOutput("  Status: OpenVINO files are ready.");
-
-                if (chkOptimumCreateBlob.Checked)
-                {
-                    SetActivityState($"Creating .blob for {device}...", allowCancel: true);
-                    string blobPath = await Task.Run(
-                        () => ExportIrBlobForTargetCore(plan.ModelFolder, outputPrimaryXml, device, plan.SourceForCli, cancellationToken),
-                        cancellationToken);
-                    AppendOutput($"  Compiled blob: {blobPath}");
-                    AppendOutput("  Status: .blob export and validation succeeded.");
-                }
-
-                RefreshOptimumSourceModels($"optimum:{Path.GetFileName(plan.ModelFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}");
-                RefreshConvertModelSelection();
-                lblOptimumStatus.Text = $"Export complete: {plan.OutputMainFolder}";
-            }
-            catch (OperationCanceledException)
-            {
-                AppendOutput("  Optimum Intel export canceled.");
-                lblOptimumStatus.Text = oldStatus;
-            }
-            catch (Exception ex)
-            {
-                AppendOutput("  Optimum Intel export failed:");
-                foreach (string line in FormatException(ex))
-                {
-                    AppendOutput($"    {line}");
-                }
-
-                lblOptimumStatus.Text = "Optimum Intel export failed. See Output for details.";
-            }
-            finally
-            {
-                DeleteOwnedTemporaryOptimumFolder(temporaryOutputFolder);
-                btnRunOptimumExport.Enabled = !string.IsNullOrWhiteSpace(GetOptimumSourceText());
-                FinishLongOperation();
-            }
-        }
-
-        private OptimumExportPlan BuildOptimumExportPlan(string sourceText)
-        {
-            if (cboOptimumSourceModel.SelectedItem is OptimumSourceModelEntry entry
-                && entry.SourcePath.Equals(sourceText, StringComparison.OrdinalIgnoreCase))
-            {
-                return CreateOptimumExportPlan(entry.SourcePath, entry.ModelFolder, entry.OutputMainFolder, entry.DisplayName, sourceIsLocalFolder: true);
-            }
-
-            string expandedSource = Environment.ExpandEnvironmentVariables(sourceText.Trim().Trim('"'));
-            if (Directory.Exists(expandedSource))
-            {
-                string fullSource = Path.GetFullPath(expandedSource);
-                string modelFolder = GetOptimumModelFolderForLocalSource(fullSource);
-                string outputMain = Path.Combine(modelFolder, "main");
-                string displayName = Path.GetFileName(modelFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                return CreateOptimumExportPlan(fullSource, modelFolder, outputMain, displayName, sourceIsLocalFolder: true);
-            }
-
-            string modelName = GetHuggingFaceModelFolderName(sourceText);
-            string hubModelFolder = Path.Combine(GetModelRoot(), modelName);
-            string hubOutputMain = Path.Combine(hubModelFolder, "main");
-            return CreateOptimumExportPlan(sourceText.Trim(), hubModelFolder, hubOutputMain, modelName, sourceIsLocalFolder: false);
-        }
-
-        private static OptimumExportPlan CreateOptimumExportPlan(
-            string sourceForCli,
-            string modelFolder,
-            string outputMainFolder,
-            string displayName,
-            bool sourceIsLocalFolder)
-        {
-            string fullModelFolder = Path.GetFullPath(modelFolder);
-            string temporaryOutputFolder = Path.Combine(fullModelFolder, $".optimum-export-{Guid.NewGuid():N}");
-            return new OptimumExportPlan
-            {
-                SourceForCli = sourceForCli,
-                ModelFolder = fullModelFolder,
-                OutputMainFolder = Path.GetFullPath(outputMainFolder),
-                TemporaryOutputFolder = temporaryOutputFolder,
-                DisplayName = displayName,
-                SourceIsLocalFolder = sourceIsLocalFolder,
-            };
-        }
-
-        private static string GetOptimumModelFolderForLocalSource(string sourceFolder)
-        {
-            string modelRoot = Path.GetFullPath(GetModelRoot());
-            string fullSource = Path.GetFullPath(sourceFolder);
-            string? mainFolder = FindContainingMainFolder(fullSource, modelRoot);
-            if (mainFolder is not null && Directory.GetParent(mainFolder) is DirectoryInfo modelFolder)
-            {
-                return modelFolder.FullName;
-            }
-
-            if (IsPathUnder(fullSource, modelRoot))
-            {
-                string relative = Path.GetRelativePath(modelRoot, fullSource);
-                string? firstSegment = relative
-                    .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
-                    .FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(firstSegment) && !IsReservedModelRootFolder(firstSegment))
-                {
-                    return Path.Combine(modelRoot, firstSegment);
-                }
-            }
-
-            string sourceName = SanitizePathSegment(Path.GetFileName(fullSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
-            return Path.Combine(modelRoot, string.IsNullOrWhiteSpace(sourceName) ? "optimum-model" : sourceName);
-        }
-
-        private IReadOnlyList<string> BuildOptimumCliArguments(string sourceForCli, string outputFolder)
-        {
-            List<string> arguments = new()
-            {
-                "export",
-                "openvino",
-                "--model",
-                sourceForCli,
-            };
-
-            string? task = GetSelectedOptimumTaskArgument();
-            if (!string.IsNullOrWhiteSpace(task))
-            {
-                arguments.Add("--task");
-                arguments.Add(task);
-            }
-
-            string? weightFormat = GetSelectedOptimumWeightFormatArgument();
-            if (!string.IsNullOrWhiteSpace(weightFormat))
-            {
-                arguments.Add("--weight-format");
-                arguments.Add(weightFormat);
-            }
-
-            if (chkOptimumTrustRemoteCode.Checked)
-            {
-                arguments.Add("--trust-remote-code");
-            }
-
-            arguments.Add(outputFolder);
-            return arguments;
-        }
-
-        private IReadOnlyList<string> BuildBundledOptimumExporterArguments(string sourceForCli, string outputFolder)
-        {
-            List<string> arguments = new()
-            {
-                "export",
-                "--model",
-                sourceForCli,
-                "--output",
-                outputFolder,
-            };
-
-            string? task = GetSelectedOptimumTaskArgument();
-            if (!string.IsNullOrWhiteSpace(task))
-            {
-                arguments.Add("--task");
-                arguments.Add(task);
-            }
-
-            string? weightFormat = GetSelectedOptimumWeightFormatArgument();
-            if (!string.IsNullOrWhiteSpace(weightFormat))
-            {
-                arguments.Add("--weight-format");
-                arguments.Add(weightFormat);
-            }
-
-            if (chkOptimumTrustRemoteCode.Checked)
-            {
-                arguments.Add("--trust-remote-code");
-            }
-
-            return arguments;
-        }
-
-        private IReadOnlyList<string> BuildOptimumProcessArguments(
-            OptimumProcessCandidate candidate,
-            string sourceForCli,
-            string outputFolder)
-        {
-            if (candidate.ArgumentStyle == OptimumProcessArgumentStyle.BundledExporter)
-            {
-                return BuildBundledOptimumExporterArguments(sourceForCli, outputFolder);
-            }
-
-            return candidate.PrefixArguments
-                .Concat(BuildOptimumCliArguments(sourceForCli, outputFolder))
+            return property.EnumerateArray()
+                .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.String)
+                .Select(item => item.GetString())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!)
                 .ToArray();
         }
 
-        private string? GetSelectedOptimumTaskArgument()
+        private static bool IsVisionLanguageModelType(string modelType)
         {
-            string value = cboOptimumTask.Text.Trim();
-            return value switch
-            {
-                string text when text.Equals("Auto", StringComparison.OrdinalIgnoreCase) => null,
-                string text when text.StartsWith("Text generation with memory", StringComparison.OrdinalIgnoreCase) => "text-generation-with-past",
-                string text when text.StartsWith("Text generation", StringComparison.OrdinalIgnoreCase) => "text-generation",
-                string text when text.StartsWith("Text to text", StringComparison.OrdinalIgnoreCase) => "text2text-generation-with-past",
-                string text when text.StartsWith("Image classification", StringComparison.OrdinalIgnoreCase) => "image-classification",
-                string text when text.StartsWith("Image to text", StringComparison.OrdinalIgnoreCase) => "image-to-text",
-                _ => null,
-            };
-        }
-
-        private string? GetSelectedOptimumWeightFormatArgument()
-        {
-            string value = cboOptimumWeightFormat.Text.Trim();
-            return value switch
-            {
-                string text when text.Equals("INT8", StringComparison.OrdinalIgnoreCase) => "int8",
-                string text when text.Equals("INT4", StringComparison.OrdinalIgnoreCase) => "int4",
-                string text when text.Equals("FP16", StringComparison.OrdinalIgnoreCase) => "fp16",
-                string text when text.Equals("FP32", StringComparison.OrdinalIgnoreCase) => "fp32",
-                _ => null,
-            };
-        }
-
-        private async Task RunOptimumExportProcessAsync(
-            string sourceForCli,
-            string outputFolder,
-            CancellationToken cancellationToken)
-        {
-            List<string> failures = new();
-            foreach (OptimumProcessCandidate candidate in GetOptimumProcessCandidates())
-            {
-                if (!IsOptimumProcessCandidateAvailable(candidate, out string unavailableReason))
-                {
-                    failures.Add(unavailableReason);
-                    continue;
-                }
-
-                IReadOnlyList<string> fullArguments = BuildOptimumProcessArguments(candidate, sourceForCli, outputFolder);
-                AppendOutput($"  Command: {candidate.DisplayName} {FormatCommandArguments(fullArguments)}");
-
-                try
-                {
-                    OptimumProcessResult result = await RunOptimumProcessAsync(candidate, fullArguments, cancellationToken);
-                    if (result.ExitCode == 0)
-                    {
-                        return;
-                    }
-
-                    if (IsMissingOptimumModuleOutput(result.CombinedOutput))
-                    {
-                        string missingModuleReason = candidate.ArgumentStyle == OptimumProcessArgumentStyle.BundledExporter
-                            ? "the bundled helper is incomplete."
-                            : "Optimum Intel was not available in that Python environment.";
-                        failures.Add($"{candidate.DisplayName}: {missingModuleReason}");
-                        continue;
-                    }
-
-                    throw new InvalidOperationException(DescribeOptimumExitCode(result.ExitCode));
-                }
-                catch (Win32Exception ex) when (ex.NativeErrorCode == 2)
-                {
-                    failures.Add($"{candidate.DisplayName}: command not found.");
-                }
-            }
-
-            throw new InvalidOperationException(
-                "Optimum Intel helper was not available. Keep Runtime\\optimum-exporter\\optimum-exporter.exe beside its _internal folder, or set WORKSTATION_OPTIMUM_CLI for developer testing. "
-                + string.Join(" ", failures));
-        }
-
-        private void AppendOptimumIntelPreflightNotes(OptimumExportPlan plan)
-        {
-            if (!Directory.Exists(plan.SourceForCli))
-            {
-                return;
-            }
-
-            string? modelType = TryReadOptimumConfigString(plan.SourceForCli, "model_type");
-            if (!string.IsNullOrWhiteSpace(modelType))
-            {
-                AppendOutput($"  Model type: {modelType}");
-                if (modelType.Equals("qwen3_next", StringComparison.OrdinalIgnoreCase))
-                {
-                    AppendOutput("  Note: Qwen3 Next is a large hybrid/MoE model. Export may need more system memory than normal text models.");
-                }
-            }
-
-            long safetensorsBytes = GetTopLevelFileBytes(plan.SourceForCli, "*.safetensors");
-            if (safetensorsBytes <= 0)
-            {
-                return;
-            }
-
-            AppendOutput($"  Source weights: {FormatBytes((ulong)safetensorsBytes)} in .safetensors files.");
-
-            MemorySnapshot memory = GetMemorySnapshot();
-            if (memory.TotalPhysical == 0)
-            {
-                return;
-            }
-
-            AppendOutput($"  System memory: {FormatBytes(memory.AvailablePhysical)} available, {FormatBytes(memory.TotalPhysical)} total.");
-            if ((ulong)safetensorsBytes > memory.TotalPhysical)
-            {
-                AppendOutput("  Note: conversion uses system RAM before the OpenVINO runtime. This source is larger than installed RAM, so export may fail or page heavily.");
-            }
-            else if ((ulong)safetensorsBytes > memory.AvailablePhysical)
-            {
-                AppendOutput("  Note: available system RAM is smaller than the source weights. Close other apps before export, or use a smaller/native OpenVINO model.");
-            }
-        }
-
-        private static string? TryReadOptimumConfigString(string folder, string propertyName)
-        {
-            try
-            {
-                string configPath = Path.Combine(folder, "config.json");
-                if (!File.Exists(configPath))
-                {
-                    return null;
-                }
-
-                using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
-                return document.RootElement.TryGetProperty(propertyName, out System.Text.Json.JsonElement property)
-                    && property.ValueKind == System.Text.Json.JsonValueKind.String
-                    ? property.GetString()
-                    : null;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-
-        private static long GetTopLevelFileBytes(string folder, string pattern)
-        {
-            try
-            {
-                return Directory.EnumerateFiles(folder, pattern, SearchOption.TopDirectoryOnly)
-                    .Sum(path => new FileInfo(path).Length);
-            }
-            catch (Exception)
-            {
-                return 0;
-            }
-        }
-
-        private static string DescribeOptimumExitCode(int exitCode)
-        {
-            if (exitCode == unchecked((int)0xC0000005))
-            {
-                return "Optimum Intel crashed with Windows access violation 0xC0000005. This is a native Python/PyTorch/OpenVINO crash, often caused by an unsupported export path, missing native dependency, or not enough system RAM for the conversion.";
-            }
-
-            if (exitCode < 0)
-            {
-                return $"Optimum Intel exited with Windows native code 0x{unchecked((uint)exitCode):X8} ({exitCode}).";
-            }
-
-            return $"Optimum Intel exited with code {exitCode}.";
-        }
-
-        private static IReadOnlyList<OptimumProcessCandidate> GetOptimumProcessCandidates()
-        {
-            List<OptimumProcessCandidate> candidates = new();
-            HashSet<string> addedFiles = new(StringComparer.OrdinalIgnoreCase);
-            string? configured = Environment.GetEnvironmentVariable("WORKSTATION_OPTIMUM_CLI");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                string configuredFile = Environment.ExpandEnvironmentVariables(configured.Trim().Trim('"'));
-                OptimumProcessArgumentStyle configuredStyle = GuessOptimumArgumentStyle(configuredFile);
-                AddOptimumProcessCandidate(candidates, addedFiles, new OptimumProcessCandidate
-                {
-                    FileName = configuredFile,
-                    DisplayName = configuredFile,
-                    ArgumentStyle = configuredStyle,
-                    WorkingDirectory = configuredStyle == OptimumProcessArgumentStyle.BundledExporter
-                        ? Path.GetDirectoryName(configuredFile)
-                        : null,
-                });
-            }
-
-            foreach (string bundledExporterPath in GetBundledOptimumExporterPaths())
-            {
-                AddOptimumProcessCandidate(candidates, addedFiles, new OptimumProcessCandidate
-                {
-                    FileName = bundledExporterPath,
-                    DisplayName = $"bundled optimum-exporter ({bundledExporterPath})",
-                    ArgumentStyle = OptimumProcessArgumentStyle.BundledExporter,
-                    WorkingDirectory = Path.GetDirectoryName(bundledExporterPath),
-                });
-            }
-
-            AddOptimumProcessCandidate(candidates, addedFiles, new OptimumProcessCandidate
-            {
-                FileName = "optimum-cli",
-                DisplayName = "optimum-cli",
-            });
-            AddOptimumProcessCandidate(candidates, addedFiles, new OptimumProcessCandidate
-            {
-                FileName = "python",
-                PrefixArguments = new[] { "-m", "optimum.commands.optimum_cli" },
-                DisplayName = "python -m optimum.commands.optimum_cli",
-            });
-            AddOptimumProcessCandidate(candidates, addedFiles, new OptimumProcessCandidate
-            {
-                FileName = "py",
-                PrefixArguments = new[] { "-m", "optimum.commands.optimum_cli" },
-                DisplayName = "py -m optimum.commands.optimum_cli",
-            });
-
-            return candidates;
-        }
-
-        private static void AddOptimumProcessCandidate(
-            List<OptimumProcessCandidate> candidates,
-            HashSet<string> addedFiles,
-            OptimumProcessCandidate candidate)
-        {
-            string key = Path.IsPathFullyQualified(candidate.FileName)
-                ? Path.GetFullPath(candidate.FileName)
-                : candidate.FileName;
-            if (addedFiles.Add(key))
-            {
-                candidates.Add(candidate);
-            }
-        }
-
-        private static IEnumerable<string> GetBundledOptimumExporterPaths()
-        {
-            const string relativePath = "Runtime\\optimum-exporter\\optimum-exporter.exe";
-            foreach (string root in new[] { AppContext.BaseDirectory, GetProjectDirectory() }.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (string.IsNullOrWhiteSpace(root))
-                {
-                    continue;
-                }
-
-                yield return Path.GetFullPath(Path.Combine(root, relativePath));
-            }
-        }
-
-        private static OptimumProcessArgumentStyle GuessOptimumArgumentStyle(string fileName)
-        {
-            string commandName = Path.GetFileNameWithoutExtension(fileName);
-            return commandName.Equals("optimum-exporter", StringComparison.OrdinalIgnoreCase)
-                ? OptimumProcessArgumentStyle.BundledExporter
-                : OptimumProcessArgumentStyle.OptimumCli;
-        }
-
-        private static bool IsOptimumProcessCandidateAvailable(OptimumProcessCandidate candidate, out string reason)
-        {
-            if (candidate.ArgumentStyle != OptimumProcessArgumentStyle.BundledExporter)
-            {
-                reason = string.Empty;
-                return true;
-            }
-
-            if (!File.Exists(candidate.FileName))
-            {
-                reason = $"{candidate.DisplayName}: missing executable.";
-                return false;
-            }
-
-            string helperFolder = Path.GetDirectoryName(candidate.FileName) ?? string.Empty;
-            string internalFolder = Path.Combine(helperFolder, "_internal");
-            if (!Directory.Exists(internalFolder))
-            {
-                reason = $"{candidate.DisplayName}: missing _internal folder.";
-                return false;
-            }
-
-            reason = string.Empty;
-            return true;
-        }
-
-        private async Task<OptimumProcessResult> RunOptimumProcessAsync(
-            OptimumProcessCandidate candidate,
-            IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken)
-        {
-            System.Text.StringBuilder combinedOutput = new();
-            using System.Diagnostics.Process process = new()
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = candidate.FileName,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    WorkingDirectory = string.IsNullOrWhiteSpace(candidate.WorkingDirectory)
-                        ? GetProjectDirectory()
-                        : candidate.WorkingDirectory,
-                },
-                EnableRaisingEvents = true,
-            };
-
-            foreach (string argument in arguments)
-            {
-                process.StartInfo.ArgumentList.Add(argument);
-            }
-
-            process.OutputDataReceived += OptimumProcess_OutputDataReceived;
-            process.ErrorDataReceived += OptimumProcess_OutputDataReceived;
-
-            bool started = false;
-            try
-            {
-                started = process.Start();
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-                await process.WaitForExitAsync(cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                if (started && !process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-
-                throw;
-            }
-            finally
-            {
-                process.OutputDataReceived -= OptimumProcess_OutputDataReceived;
-                process.ErrorDataReceived -= OptimumProcess_OutputDataReceived;
-            }
-
-            return new OptimumProcessResult
-            {
-                ExitCode = process.ExitCode,
-                CombinedOutput = combinedOutput.ToString(),
-            };
-
-            void OptimumProcess_OutputDataReceived(object sender, System.Diagnostics.DataReceivedEventArgs e)
-            {
-                if (string.IsNullOrWhiteSpace(e.Data))
-                {
-                    return;
-                }
-
-                lock (combinedOutput)
-                {
-                    combinedOutput.AppendLine(e.Data);
-                }
-
-                AppendOutput($"    {e.Data}");
-            }
-        }
-
-        private static bool IsMissingOptimumModuleOutput(string output)
-        {
-            return output.Contains("No module named", StringComparison.OrdinalIgnoreCase)
-                && output.Contains("optimum", StringComparison.OrdinalIgnoreCase);
+            return modelType.Equals("qwen2_vl", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("qwen2_5_vl", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("qwen3_vl", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("qwen3_5", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("qwen3_5_moe", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("llava", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("llava_next", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("llava_next_video", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("gemma3", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("gemma4", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("llama4", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("phi3_v", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("phi4mm", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("phi4_multimodal", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("minicpmv", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("minicpmo", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("smolvlm", StringComparison.OrdinalIgnoreCase)
+                || modelType.Equals("internvl_chat", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string FormatCommandArguments(IEnumerable<string> arguments)
@@ -8450,129 +8553,6 @@ namespace WorkStationC_
             return argument.Any(char.IsWhiteSpace) || argument.Contains('"', StringComparison.Ordinal)
                 ? $"\"{argument.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
                 : argument;
-        }
-
-        private static string? FindPrimaryOptimumIrXml(string outputFolder)
-        {
-            string[] preferredNames =
-            {
-                "openvino_model.xml",
-                "openvino_language_model.xml",
-            };
-
-            foreach (string name in preferredNames)
-            {
-                string candidate = Path.Combine(outputFolder, name);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            return Directory
-                .EnumerateFiles(outputFolder, "*.xml", SearchOption.AllDirectories)
-                .OrderBy(path => File.Exists(Path.ChangeExtension(path, ".bin")) ? 0 : 1)
-                .ThenBy(path => path.Contains("model", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
-        }
-
-        private static void WriteOptimumExportManifest(
-            string outputFolder,
-            string source,
-            IReadOnlyList<string> outputFiles,
-            long exportMilliseconds)
-        {
-            object manifest = new
-            {
-                convertedAtUtc = DateTime.UtcNow,
-                sourcePath = source,
-                format = "OpenVINO IR model",
-                method = "Optimum Intel",
-                exportMilliseconds,
-                files = outputFiles.Select(path => Path.GetRelativePath(outputFolder, path)).ToArray(),
-            };
-            string manifestPath = Path.Combine(outputFolder, "optimum-export.json");
-            string json = System.Text.Json.JsonSerializer.Serialize(
-                manifest,
-                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-            WriteTextAtomically(manifestPath, NormalizeTextFileLineEndings(json));
-        }
-
-        private string ExportIrBlobForTargetCore(
-            string modelFolder,
-            string sourceXml,
-            string device,
-            string originalSource,
-            CancellationToken cancellationToken)
-        {
-            string deviceFolder = GetOptimizedBlobDeviceFolder(modelFolder, sourceXml, device);
-            string blobPath = Path.Combine(deviceFolder, "model.blob");
-            string temporaryBlobPath = $"{blobPath}.partial";
-
-            try
-            {
-                Directory.CreateDirectory(deviceFolder);
-                ConfigureOpenVinoRuntimeSearchPath();
-                cancellationToken.ThrowIfCancellationRequested();
-                string? sourceBinPath = FindMatchingBinPath(sourceXml);
-                using OpenVinoSharp.Core core = new();
-                using OpenVinoSharp.Model model = string.IsNullOrWhiteSpace(sourceBinPath)
-                    ? core.ReadModelUnicode(sourceXml)
-                    : core.ReadModelUnicode(sourceXml, sourceBinPath);
-                cancellationToken.ThrowIfCancellationRequested();
-                using OpenVinoSharp.CompiledModel compiledModel = core.CompileModel(model, device);
-                cancellationToken.ThrowIfCancellationRequested();
-                compiledModel.ExportModel(temporaryBlobPath);
-                cancellationToken.ThrowIfCancellationRequested();
-                using OpenVinoSharp.CompiledModel validationModel = core.ImportModel(temporaryBlobPath, device);
-                _ = validationModel.InputCount;
-                cancellationToken.ThrowIfCancellationRequested();
-
-                File.Move(temporaryBlobPath, blobPath, overwrite: true);
-                object manifest = new
-                {
-                    exportedAtUtc = DateTime.UtcNow,
-                    sourcePath = sourceXml,
-                    originalSource,
-                    format = "OpenVINO compiled model blob",
-                    device,
-                    deviceFolder = Path.GetFileName(deviceFolder),
-                    blob = Path.GetFileName(blobPath),
-                };
-                string manifestPath = Path.Combine(deviceFolder, "conversion.json");
-                string json = System.Text.Json.JsonSerializer.Serialize(
-                    manifest,
-                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-                WriteTextAtomically(manifestPath, NormalizeTextFileLineEndings(json));
-
-                return blobPath;
-            }
-            finally
-            {
-                if (File.Exists(temporaryBlobPath))
-                {
-                    File.Delete(temporaryBlobPath);
-                }
-            }
-        }
-
-        private static void DeleteOwnedTemporaryOptimumFolder(string? temporaryFolder)
-        {
-            if (string.IsNullOrWhiteSpace(temporaryFolder) || !Directory.Exists(temporaryFolder))
-            {
-                return;
-            }
-
-            string fullTemporaryFolder = Path.GetFullPath(temporaryFolder);
-            string folderName = Path.GetFileName(fullTemporaryFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            if (!folderName.StartsWith(".optimum-export-", StringComparison.Ordinal)
-                || !IsPathUnder(fullTemporaryFolder, GetModelRoot()))
-            {
-                throw new InvalidOperationException("Refusing to remove an Optimum folder that is not an owned temporary export folder.");
-            }
-
-            Directory.Delete(fullTemporaryFolder, recursive: true);
         }
 
         private static void WriteTextAtomically(string path, string contents)
@@ -8616,7 +8596,1637 @@ namespace WorkStationC_
 
         #endregion
 
-        #region MainForm.Convert.cs
+        #region OVMS Pull
+        private const string DefaultOvmsExecutablePath = "C:\\Example\\OpenVINO\\ovms.exe";
+        private const string DefaultOvmsPythonRuntimePath = "C:\\Example\\OpenVINO\\python";
+        private const string DefaultOvmsExportToolsPath = "C:\\Users\\ExampleUser\\AppData\\Local\\Python\\pythoncore-3.14-64\\Scripts";
+        private const string DefaultOvmsModelRepositoryPath = "C:\\Example\\Models";
+        private const string PreferredOvmsPullSourceModel = "Qwen/Qwen3.5-4B";
+        private const string OvmsSourceFormatExport = "HF export";
+        private const string OvmsSourceFormatGguf = "GGUF";
+        private const string DefaultOvmsGgufSourceModel = "unsloth/Qwen3.6-27B-MTP-GGUF";
+        private const string DefaultOvmsGgufFilename = "Qwen3.6-27B-UD-Q8_K_XL.gguf";
+
+        private sealed class OvmsPullDefaults
+        {
+            public string OvmsExecutable { get; set; } = DefaultOvmsExecutablePath;
+            public string PythonRuntimePath { get; set; } = DefaultOvmsPythonRuntimePath;
+            public string ExportToolsPath { get; set; } = DefaultOvmsExportToolsPath;
+            public string SourceFormat { get; set; } = OvmsSourceFormatExport;
+            public string Task { get; set; } = "text_generation";
+            public string PipelineType { get; set; } = "VLM";
+            public string SourceModel { get; set; } = PreferredOvmsPullSourceModel;
+            public string GgufFilename { get; set; } = string.Empty;
+            public string ModelRepositoryPath { get; set; } = DefaultOvmsModelRepositoryPath;
+            public string WeightFormat { get; set; } = "int8";
+            public string LogPath { get; set; } = "C:\\Example\\OpenVINO\\qwen35-4b-pull-global.log";
+            public bool OverwriteModels { get; set; } = true;
+            public bool DebugLogging { get; set; } = true;
+            public List<string> SourceFormats { get; } = new() { OvmsSourceFormatExport, OvmsSourceFormatGguf };
+            public List<string> Tasks { get; } = new() { "text_generation" };
+            public List<string> PipelineTypes { get; } = new() { "VLM", "LM" };
+            public List<string> SourceModels { get; } = new() { PreferredOvmsPullSourceModel, DefaultOvmsGgufSourceModel };
+            public List<string> WeightFormats { get; } = new() { "int8", "int4", "fp16", "fp32" };
+            public List<OvmsPullCommandBlock> Commands { get; } = new();
+        }
+
+        private sealed class OvmsPullCommandBlock
+        {
+            public string OvmsExecutable { get; set; } = string.Empty;
+            public string SourceFormat { get; set; } = string.Empty;
+            public string Task { get; set; } = string.Empty;
+            public string PipelineType { get; set; } = string.Empty;
+            public string SourceModel { get; set; } = string.Empty;
+            public string GgufFilename { get; set; } = string.Empty;
+            public string ModelRepositoryPath { get; set; } = string.Empty;
+            public string WeightFormat { get; set; } = string.Empty;
+            public string LogLevel { get; set; } = string.Empty;
+            public string LogPath { get; set; } = string.Empty;
+            public bool OverwriteModels { get; set; }
+            public bool HasArguments =>
+                !string.IsNullOrWhiteSpace(Task)
+                || !string.IsNullOrWhiteSpace(PipelineType)
+                || !string.IsNullOrWhiteSpace(SourceModel)
+                || !string.IsNullOrWhiteSpace(GgufFilename)
+                || !string.IsNullOrWhiteSpace(ModelRepositoryPath)
+                || !string.IsNullOrWhiteSpace(WeightFormat)
+                || !string.IsNullOrWhiteSpace(LogPath)
+                || OverwriteModels;
+        }
+
+        private sealed class OvmsPullPlan
+        {
+            public required string OvmsExecutable { get; init; }
+            public required string PythonRuntimePath { get; init; }
+            public required string ExportToolsPath { get; init; }
+            public required string ModelRepositoryPath { get; init; }
+            public required string SourceModel { get; init; }
+            public string GgufFilename { get; init; } = string.Empty;
+            public bool IsGgufPull { get; init; }
+            public required string ExpectedModelFolder { get; init; }
+            public string LogPath { get; init; } = string.Empty;
+            public required IReadOnlyList<string> Arguments { get; init; }
+        }
+
+        private sealed record OvmsVersionExpectation(
+            string Name,
+            string ExpectedVersion,
+            bool Required,
+            bool Strict);
+
+        private sealed class OvmsStackCheckResult
+        {
+            public bool CanRunPull { get; set; } = true;
+            public bool HasWarnings { get; set; }
+            public string ExportPythonPath { get; set; } = string.Empty;
+            public List<string> Lines { get; } = new();
+            public List<string> RepairCommands { get; } = new();
+        }
+
+        private sealed class OvmsCommandResult
+        {
+            public int ExitCode { get; init; }
+            public bool TimedOut { get; init; }
+            public string StandardOutput { get; init; } = string.Empty;
+            public string StandardError { get; init; } = string.Empty;
+            public string StartError { get; init; } = string.Empty;
+            public bool Started => string.IsNullOrWhiteSpace(StartError);
+            public bool Succeeded => Started && !TimedOut && ExitCode == 0;
+        }
+
+        private void InitializeOvmsPullTab()
+        {
+            OvmsPullDefaults defaults = LoadOvmsPullDefaultsFromContext();
+            _ovmsPullCommandDefaultsBySource.Clear();
+            foreach (OvmsPullCommandBlock command in defaults.Commands)
+            {
+                if (!string.IsNullOrWhiteSpace(command.SourceModel))
+                {
+                    _ovmsPullCommandDefaultsBySource[command.SourceModel] = command;
+                }
+            }
+
+            _updatingOvmsPullDefaults = true;
+            try
+            {
+                txtOvmsExecutable.Text = defaults.OvmsExecutable;
+                txtOvmsPythonPath.Text = defaults.PythonRuntimePath;
+                txtOvmsExportToolsPath.Text = defaults.ExportToolsPath;
+                SetComboValues(cboOvmsSourceFormat, defaults.SourceFormats, defaults.SourceFormat);
+                SetComboValues(cboOvmsTask, defaults.Tasks, defaults.Task);
+                SetComboValues(cboOvmsPipelineType, defaults.PipelineTypes, defaults.PipelineType);
+                SetComboValues(cboOvmsSourceModel, defaults.SourceModels, defaults.SourceModel);
+                SetComboValues(cboOvmsWeightFormat, defaults.WeightFormats, defaults.WeightFormat);
+                txtOvmsGgufFilename.Text = defaults.GgufFilename;
+                txtOvmsModelRepository.Text = defaults.ModelRepositoryPath;
+                txtOvmsLogPath.Text = defaults.LogPath;
+                chkOvmsOverwrite.Checked = defaults.OverwriteModels;
+                chkOvmsDebug.Checked = defaults.DebugLogging;
+            }
+            finally
+            {
+                _updatingOvmsPullDefaults = false;
+            }
+
+            UpdateOvmsPullStatus();
+        }
+
+        private static void SetComboValues(ComboBox comboBox, IEnumerable<string> values, string selectedValue)
+        {
+            string[] distinctValues = values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            comboBox.Items.Clear();
+            foreach (string value in distinctValues)
+            {
+                comboBox.Items.Add(value);
+            }
+
+            int selectedIndex = Array.FindIndex(
+                distinctValues,
+                value => value.Equals(selectedValue, StringComparison.OrdinalIgnoreCase));
+            if (selectedIndex >= 0)
+            {
+                comboBox.SelectedIndex = selectedIndex;
+            }
+            else
+            {
+                comboBox.Text = selectedValue;
+            }
+        }
+
+        private static OvmsPullDefaults LoadOvmsPullDefaultsFromContext()
+        {
+            OvmsPullDefaults defaults = new();
+            string contextPath = GetProjectContextPath();
+            if (File.Exists(contextPath))
+            {
+                string text = File.ReadAllText(contextPath);
+                defaults.OvmsExecutable = ReadContextValue(text, "OVMS executable:") ?? defaults.OvmsExecutable;
+                string? globalOptimumCli = ReadContextValue(text, "Global optimum-cli:");
+                string? globalOptimumCliFolder = string.IsNullOrWhiteSpace(globalOptimumCli)
+                    ? null
+                    : Path.GetDirectoryName(globalOptimumCli);
+                defaults.ExportToolsPath = string.IsNullOrWhiteSpace(globalOptimumCliFolder)
+                    ? defaults.ExportToolsPath
+                    : globalOptimumCliFolder;
+                string? bundledPython = ReadContextValue(text, "Bundled Python runtime:");
+                string? bundledPythonFolder = string.IsNullOrWhiteSpace(bundledPython)
+                    ? null
+                    : Path.GetDirectoryName(bundledPython);
+                defaults.PythonRuntimePath = string.IsNullOrWhiteSpace(bundledPythonFolder)
+                    ? defaults.PythonRuntimePath
+                    : bundledPythonFolder;
+                defaults.ModelRepositoryPath = ReadContextValue(text, "Model repository:") ?? defaults.ModelRepositoryPath;
+
+                foreach (OvmsPullCommandBlock command in ExtractOvmsPullCommands(text))
+                {
+                    defaults.Commands.Add(command);
+                    AddUniqueOption(defaults.SourceFormats, command.SourceFormat);
+                    AddUniqueOption(defaults.Tasks, command.Task);
+                    AddUniqueOption(defaults.PipelineTypes, command.PipelineType);
+                    AddUniqueOption(defaults.SourceModels, command.SourceModel);
+                    AddUniqueOption(defaults.WeightFormats, command.WeightFormat);
+                }
+            }
+
+            OvmsPullCommandBlock builtInGgufCommand = new()
+            {
+                SourceFormat = OvmsSourceFormatGguf,
+                Task = "text_generation",
+                SourceModel = DefaultOvmsGgufSourceModel,
+                GgufFilename = DefaultOvmsGgufFilename,
+                ModelRepositoryPath = defaults.ModelRepositoryPath,
+                LogLevel = "DEBUG",
+                LogPath = "C:\\Example\\OpenVINO\\qwen36-27b-mtp-gguf-q8.log",
+                OverwriteModels = true,
+            };
+            defaults.Commands.Add(builtInGgufCommand);
+            AddUniqueOption(defaults.SourceFormats, builtInGgufCommand.SourceFormat);
+            AddUniqueOption(defaults.Tasks, builtInGgufCommand.Task);
+            AddUniqueOption(defaults.SourceModels, builtInGgufCommand.SourceModel);
+
+            OvmsPullCommandBlock? selectedCommand = defaults.Commands.FirstOrDefault(
+                    command => command.SourceModel.Equals(PreferredOvmsPullSourceModel, StringComparison.OrdinalIgnoreCase))
+                ?? defaults.Commands.FirstOrDefault(command => command.PipelineType.Equals("VLM", StringComparison.OrdinalIgnoreCase))
+                ?? defaults.Commands.FirstOrDefault();
+
+            if (selectedCommand is not null)
+            {
+                ApplyCommandBlockToDefaults(defaults, selectedCommand);
+            }
+
+            AddUniqueOption(defaults.Tasks, defaults.Task);
+            AddUniqueOption(defaults.PipelineTypes, defaults.PipelineType);
+            AddUniqueOption(defaults.SourceModels, defaults.SourceModel);
+            AddUniqueOption(defaults.WeightFormats, defaults.WeightFormat);
+            return defaults;
+        }
+
+        private static void ApplyCommandBlockToDefaults(OvmsPullDefaults defaults, OvmsPullCommandBlock command)
+        {
+            if (!string.IsNullOrWhiteSpace(command.OvmsExecutable))
+            {
+                defaults.OvmsExecutable = command.OvmsExecutable;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.SourceFormat))
+            {
+                defaults.SourceFormat = command.SourceFormat;
+            }
+            else if (!string.IsNullOrWhiteSpace(command.GgufFilename))
+            {
+                defaults.SourceFormat = OvmsSourceFormatGguf;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.Task))
+            {
+                defaults.Task = command.Task;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.PipelineType))
+            {
+                defaults.PipelineType = command.PipelineType;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.SourceModel))
+            {
+                defaults.SourceModel = command.SourceModel;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.GgufFilename))
+            {
+                defaults.GgufFilename = command.GgufFilename;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.ModelRepositoryPath))
+            {
+                defaults.ModelRepositoryPath = command.ModelRepositoryPath;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.WeightFormat))
+            {
+                defaults.WeightFormat = command.WeightFormat;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.LogPath))
+            {
+                defaults.LogPath = command.LogPath;
+            }
+
+            defaults.OverwriteModels = command.OverwriteModels;
+            defaults.DebugLogging = command.LogLevel.Equals("DEBUG", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetProjectContextPath()
+        {
+            return Path.Combine(GetProjectDirectory(), "Context.md");
+        }
+
+        private static string? ReadContextValue(string text, string label)
+        {
+            foreach (string rawLine in SplitTextLines(text))
+            {
+                string line = rawLine.Trim();
+                if (!line.StartsWith(label, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string value = line[label.Length..].Trim();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+
+            return null;
+        }
+
+        private static IReadOnlyList<OvmsPullCommandBlock> ExtractOvmsPullCommands(string text)
+        {
+            List<OvmsPullCommandBlock> commands = new();
+            OvmsPullCommandBlock? current = null;
+
+            foreach (string rawLine in SplitTextLines(text))
+            {
+                string line = rawLine.Trim();
+                if (line.StartsWith("```", StringComparison.Ordinal))
+                {
+                    AddCurrentCommand();
+                    continue;
+                }
+
+                if (line.Contains("ovms.exe", StringComparison.OrdinalIgnoreCase)
+                    && line.Contains("--pull", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddCurrentCommand();
+                    current = new OvmsPullCommandBlock();
+                    int pullIndex = line.IndexOf("--pull", StringComparison.OrdinalIgnoreCase);
+                    string executable = pullIndex > 0 ? line[..pullIndex].Trim() : line;
+                    current.OvmsExecutable = executable.TrimEnd('^').Trim().Trim('"');
+                    continue;
+                }
+
+                if (current is null || !line.StartsWith("--", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                ParseOvmsPullArgumentLine(current, line);
+            }
+
+            AddCurrentCommand();
+            return commands;
+
+            void AddCurrentCommand()
+            {
+                if (current is not null && current.HasArguments)
+                {
+                    commands.Add(current);
+                }
+
+                current = null;
+            }
+        }
+
+        private static void ParseOvmsPullArgumentLine(OvmsPullCommandBlock command, string rawLine)
+        {
+            string line = rawLine.TrimEnd('^').Trim();
+            if (!line.StartsWith("--", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string option = line[2..];
+            int separator = option.IndexOfAny(new[] { ' ', '\t' });
+            string name = separator < 0 ? option : option[..separator];
+            string value = separator < 0 ? string.Empty : option[(separator + 1)..].Trim().Trim('"');
+            switch (name)
+            {
+                case "task":
+                    command.Task = value;
+                    break;
+                case "pipeline_type":
+                    command.PipelineType = value;
+                    break;
+                case "source_model":
+                    command.SourceModel = value;
+                    break;
+                case "gguf_filename":
+                    command.GgufFilename = value;
+                    command.SourceFormat = OvmsSourceFormatGguf;
+                    break;
+                case "model_repository_path":
+                    command.ModelRepositoryPath = value;
+                    break;
+                case "weight-format":
+                    command.WeightFormat = value;
+                    break;
+                case "overwrite_models":
+                    command.OverwriteModels = true;
+                    break;
+                case "log_level":
+                    command.LogLevel = value;
+                    break;
+                case "log_path":
+                    command.LogPath = value;
+                    break;
+            }
+        }
+
+        private static IEnumerable<string> SplitTextLines(string text)
+        {
+            return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Split('\n');
+        }
+
+        private static void AddUniqueOption(List<string> values, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)
+                || values.Any(existing => existing.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            values.Add(value.Trim());
+        }
+
+        private void cboOvmsSourceFormat_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsSourceFormat_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsTask_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsTask_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsPipelineType_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsPipelineType_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsWeightFormat_SelectedIndexChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void cboOvmsWeightFormat_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsExecutable_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsPythonPath_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsExportToolsPath_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsGgufFilename_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsModelRepository_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void txtOvmsLogPath_TextChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void chkOvmsOverwrite_CheckedChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private void chkOvmsDebug_CheckedChanged(object? sender, EventArgs e) => UpdateOvmsPullStatus();
+        private async void btnCheckOvmsVersions_Click(object? sender, EventArgs e) => await CheckOvmsVersionsForSelectedPullAsync();
+        private void btnPreviewOvmsPull_Click(object? sender, EventArgs e) => PreviewOvmsPullCommand();
+        private async void btnRunOvmsPull_Click(object? sender, EventArgs e) => await StartOvmsPullCommandPromptAsync();
+
+        private void cboOvmsSourceModel_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            ApplyOvmsSourceDefaultsFromSelection();
+            UpdateOvmsPullStatus();
+        }
+
+        private void cboOvmsSourceModel_TextChanged(object? sender, EventArgs e)
+        {
+            if (!_updatingOvmsPullDefaults)
+            {
+                UpdateOvmsPullStatus();
+            }
+        }
+
+        private void ApplyOvmsSourceDefaultsFromSelection()
+        {
+            if (_updatingOvmsPullDefaults)
+            {
+                return;
+            }
+
+            string sourceModel = cboOvmsSourceModel.Text.Trim();
+            if (string.IsNullOrWhiteSpace(sourceModel)
+                || !_ovmsPullCommandDefaultsBySource.TryGetValue(sourceModel, out OvmsPullCommandBlock? command))
+            {
+                return;
+            }
+
+            _updatingOvmsPullDefaults = true;
+            try
+            {
+                SetControlTextIfNotBlank(cboOvmsSourceFormat, string.IsNullOrWhiteSpace(command.SourceFormat)
+                    ? string.IsNullOrWhiteSpace(command.GgufFilename) ? OvmsSourceFormatExport : OvmsSourceFormatGguf
+                    : command.SourceFormat);
+                SetControlTextIfNotBlank(cboOvmsTask, command.Task);
+                SetControlTextIfNotBlank(cboOvmsPipelineType, command.PipelineType);
+                SetControlTextIfNotBlank(cboOvmsWeightFormat, command.WeightFormat);
+                SetControlTextIfNotBlank(txtOvmsGgufFilename, command.GgufFilename);
+                SetControlTextIfNotBlank(txtOvmsModelRepository, command.ModelRepositoryPath);
+                SetControlTextIfNotBlank(txtOvmsLogPath, command.LogPath);
+                if (!string.IsNullOrWhiteSpace(command.OvmsExecutable))
+                {
+                    txtOvmsExecutable.Text = command.OvmsExecutable;
+                }
+
+                chkOvmsOverwrite.Checked = command.OverwriteModels;
+                chkOvmsDebug.Checked = command.LogLevel.Equals("DEBUG", StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                _updatingOvmsPullDefaults = false;
+            }
+        }
+
+        private static void SetControlTextIfNotBlank(Control control, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                control.Text = value.Trim();
+            }
+        }
+
+        private void UpdateOvmsPullStatus()
+        {
+            if (_updatingOvmsPullDefaults)
+            {
+                return;
+            }
+
+            bool isGgufPull = IsOvmsGgufPullSelected();
+            cboOvmsPipelineType.Enabled = !isGgufPull;
+            lblOvmsPipelineType.Enabled = !isGgufPull;
+            cboOvmsWeightFormat.Enabled = !isGgufPull;
+            lblOvmsWeightFormat.Enabled = !isGgufPull;
+            txtOvmsExportToolsPath.Enabled = !isGgufPull;
+            lblOvmsExportToolsPath.Enabled = !isGgufPull;
+            txtOvmsGgufFilename.Enabled = isGgufPull;
+            lblOvmsGgufFilename.Enabled = isGgufPull;
+
+            bool hasRequiredFields =
+                !string.IsNullOrWhiteSpace(txtOvmsExecutable.Text)
+                && !string.IsNullOrWhiteSpace(txtOvmsPythonPath.Text)
+                && !string.IsNullOrWhiteSpace(cboOvmsTask.Text)
+                && !string.IsNullOrWhiteSpace(cboOvmsSourceFormat.Text)
+                && !string.IsNullOrWhiteSpace(cboOvmsSourceModel.Text)
+                && !string.IsNullOrWhiteSpace(txtOvmsModelRepository.Text)
+                && (isGgufPull
+                    ? !string.IsNullOrWhiteSpace(txtOvmsGgufFilename.Text)
+                    : !string.IsNullOrWhiteSpace(txtOvmsExportToolsPath.Text)
+                        && !string.IsNullOrWhiteSpace(cboOvmsPipelineType.Text)
+                        && !string.IsNullOrWhiteSpace(cboOvmsWeightFormat.Text));
+
+            btnCheckOvmsVersions.Enabled = hasRequiredFields;
+            btnPreviewOvmsPull.Enabled = hasRequiredFields;
+            btnRunOvmsPull.Enabled = hasRequiredFields;
+
+            if (!hasRequiredFields)
+            {
+                lblOvmsPullStatus.Text = "Fill in the OVMS pull settings.";
+                return;
+            }
+
+            string executable = ExpandPathText(txtOvmsExecutable.Text);
+            string pythonPath = ExpandPathText(txtOvmsPythonPath.Text);
+            string exportToolsPath = ExpandPathText(txtOvmsExportToolsPath.Text);
+            if (!File.Exists(executable))
+            {
+                lblOvmsPullStatus.Text = $"OVMS program not found: {executable}";
+                return;
+            }
+
+            if (!Directory.Exists(pythonPath))
+            {
+                lblOvmsPullStatus.Text = $"Python DLL folder not found: {pythonPath}";
+                return;
+            }
+
+            if (!isGgufPull)
+            {
+                string missingExportToolsPath = SplitPathList(exportToolsPath)
+                    .FirstOrDefault(path => !Directory.Exists(path))
+                    ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(missingExportToolsPath))
+                {
+                    lblOvmsPullStatus.Text = $"Export tools folder not found: {missingExportToolsPath}";
+                    return;
+                }
+            }
+
+            lblOvmsPullStatus.Text = isGgufPull
+                ? $"Ready: {cboOvmsSourceModel.Text.Trim()} / {txtOvmsGgufFilename.Text.Trim()} -> {txtOvmsModelRepository.Text.Trim()}"
+                : $"Ready: {cboOvmsSourceModel.Text.Trim()} -> {txtOvmsModelRepository.Text.Trim()}";
+        }
+
+        private bool IsOvmsGgufPullSelected()
+        {
+            return cboOvmsSourceFormat.Text.Trim().Equals(OvmsSourceFormatGguf, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(txtOvmsGgufFilename.Text)
+                    && cboOvmsSourceModel.Text.Contains("GGUF", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void PreviewOvmsPullCommand()
+        {
+            try
+            {
+                OvmsPullPlan plan = BuildOvmsPullPlan();
+                AppendOutput("OVMS pull command");
+                AppendOutput($"  {plan.OvmsExecutable} {FormatCommandArguments(plan.Arguments)}");
+                AppendOutput(plan.IsGgufPull
+                    ? $"  Source type: GGUF direct ({plan.GgufFilename})"
+                    : "  Source type: Hugging Face export through OVMS/Optimum");
+                AppendOutput($"  Python DLL folder added to PATH: {plan.PythonRuntimePath}");
+                if (!plan.IsGgufPull)
+                {
+                    AppendOutput($"  Export tools folder added to PATH: {plan.ExportToolsPath}");
+                }
+
+                AppendOutput($"  Command Prompt script: {BuildOvmsPullCommandScriptPath(plan)}");
+                AppendOutput($"  Expected model folder: {plan.ExpectedModelFolder}");
+                AppendOutput(chkOvmsOverwrite.Checked
+                    ? "  Replace existing files: on. OVMS may replace the existing files for this model."
+                    : "  Replace existing files: off. Existing files for this model are kept unless OVMS requires a clean target.");
+                AppendOutput(chkOvmsDebug.Checked
+                    ? "  Log level: DEBUG"
+                    : "  Log level: INFO");
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"OVMS pull preview failed: {ShortError(ex)}");
+            }
+        }
+
+        private async Task<bool> CheckOvmsVersionsForSelectedPullAsync()
+        {
+            OvmsPullPlan plan;
+            try
+            {
+                plan = BuildOvmsPullPlan();
+                ValidateOvmsPullPlan(plan);
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"OVMS stack check could not start: {ShortError(ex)}");
+                UpdateOvmsPullStatus();
+                return false;
+            }
+
+            OvmsStackCheckResult result = await CheckOvmsPullVersionStackAsync(plan, reportToOutput: true);
+            lblOvmsPullStatus.Text = result.CanRunPull
+                ? result.HasWarnings ? "Version check passed with warnings." : "Version check passed."
+                : "Version check failed. See Output.";
+            return result.CanRunPull;
+        }
+
+        private async Task<OvmsStackCheckResult> CheckOvmsPullVersionStackAsync(OvmsPullPlan plan, bool reportToOutput)
+        {
+            OvmsStackCheckResult result = new();
+            IReadOnlyList<string> pathEntries = BuildOvmsPathPrefixEntries(plan);
+            IReadOnlyList<OvmsVersionExpectation> expectations = LoadOvmsVersionExpectationsFromContext();
+            Dictionary<string, OvmsVersionExpectation> expectationsByName = expectations
+                .ToDictionary(expectation => NormalizePythonPackageName(expectation.Name), StringComparer.OrdinalIgnoreCase);
+
+            result.Lines.Add(string.Empty);
+            result.Lines.Add("OVMS export stack check");
+            result.Lines.Add("------------------------------------------------------------");
+            result.Lines.Add($"OVMS program: {plan.OvmsExecutable}");
+            result.Lines.Add($"Bundled Python DLL folder: {plan.PythonRuntimePath}");
+            result.Lines.Add(plan.IsGgufPull
+                ? "Source type: GGUF direct pull; Optimum/Transformers export packages are not used."
+                : "Source type: Hugging Face export through OVMS/Optimum.");
+
+            if (!File.Exists(plan.OvmsExecutable))
+            {
+                AddStackFailure(result, $"OVMS program not found: {plan.OvmsExecutable}");
+            }
+
+            if (!Directory.Exists(plan.PythonRuntimePath))
+            {
+                AddStackFailure(result, $"Bundled Python DLL folder not found: {plan.PythonRuntimePath}");
+            }
+            else
+            {
+                string pythonDll = Path.Combine(plan.PythonRuntimePath, "python312.dll");
+                if (File.Exists(pythonDll))
+                {
+                    result.Lines.Add($"OK: OVMS Python DLL found: {pythonDll}");
+                }
+                else
+                {
+                    AddStackFailure(result, $"Expected OVMS Python DLL was not found: {pythonDll}");
+                }
+            }
+
+            if (File.Exists(plan.OvmsExecutable) && Directory.Exists(plan.PythonRuntimePath))
+            {
+                OvmsCommandResult ovmsVersion = await RunOvmsCommandAsync(
+                    plan.OvmsExecutable,
+                    "--version",
+                    Path.GetDirectoryName(plan.OvmsExecutable) ?? GetProjectDirectory(),
+                    new[] { plan.PythonRuntimePath },
+                    timeoutMilliseconds: 15000);
+                AppendCommandCheckOutput(result, "ovms --version", ovmsVersion);
+
+                if (ovmsVersion.Succeeded
+                    && expectationsByName.TryGetValue("openvino", out OvmsVersionExpectation? openvinoExpectation)
+                    && !string.IsNullOrWhiteSpace(openvinoExpectation.ExpectedVersion)
+                    && !CombineCommandOutput(ovmsVersion).Contains(openvinoExpectation.ExpectedVersion, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddStackWarning(result, $"OVMS version output did not include expected OpenVINO version {openvinoExpectation.ExpectedVersion}. Confirm this OVMS install matches the working C:\\Example\\OpenVINO package.");
+                }
+            }
+
+            if (plan.IsGgufPull)
+            {
+                result.Lines.Add("Skipped: GGUF pull does not need global optimum-cli, Transformers, or Optimum Intel.");
+                FinishOvmsStackCheck(result, string.Empty, expectations);
+                ReportOvmsStackCheckResult(result, reportToOutput);
+                return result;
+            }
+
+            result.Lines.Add($"Export tools folder: {plan.ExportToolsPath}");
+            string? exportPython = FindOvmsExportPythonPath(pathEntries);
+            if (string.IsNullOrWhiteSpace(exportPython))
+            {
+                AddStackFailure(result, "Export Python was not found. The export tools folder should point at the global Python Scripts folder used by the successful conversion.");
+            }
+            else
+            {
+                result.ExportPythonPath = exportPython;
+                result.Lines.Add($"Export Python: {exportPython}");
+            }
+
+            string? optimumCli = FindExecutableOnPath("optimum-cli.exe", pathEntries);
+            if (string.IsNullOrWhiteSpace(optimumCli))
+            {
+                AddStackFailure(result, "optimum-cli.exe was not found on the generated PATH.");
+            }
+            else
+            {
+                result.Lines.Add($"OK: optimum-cli.exe: {optimumCli}");
+            }
+
+            if (string.IsNullOrWhiteSpace(exportPython))
+            {
+                FinishOvmsStackCheck(result, exportPython ?? string.Empty, expectations);
+                ReportOvmsStackCheckResult(result, reportToOutput);
+                return result;
+            }
+
+            OvmsCommandResult pythonVersion = await RunOvmsCommandAsync(
+                exportPython,
+                "--version",
+                Path.GetDirectoryName(exportPython) ?? GetProjectDirectory(),
+                pathEntries,
+                timeoutMilliseconds: 15000);
+            AppendCommandCheckOutput(result, "python --version", pythonVersion);
+
+            string actualPythonVersion = ParsePythonVersion(CombineCommandOutput(pythonVersion));
+            if (expectationsByName.TryGetValue("python", out OvmsVersionExpectation? pythonExpectation))
+            {
+                CompareVersion(result, pythonExpectation, actualPythonVersion);
+            }
+
+            OvmsCommandResult pipShow = await RunOvmsCommandAsync(
+                exportPython,
+                "-m pip show transformers optimum-intel optimum openvino openvino-genai huggingface-hub accelerate",
+                Path.GetDirectoryName(exportPython) ?? GetProjectDirectory(),
+                pathEntries,
+                timeoutMilliseconds: 30000);
+            AppendCommandCheckOutput(result, "python -m pip show ...", pipShow);
+
+            Dictionary<string, string> packageVersions = ParsePipShowVersions(CombineCommandOutput(pipShow));
+            foreach (OvmsVersionExpectation expectation in expectations.Where(expectation => !NormalizePythonPackageName(expectation.Name).Equals("python", StringComparison.OrdinalIgnoreCase)))
+            {
+                string normalizedName = NormalizePythonPackageName(expectation.Name);
+                packageVersions.TryGetValue(normalizedName, out string? actualVersion);
+                CompareVersion(result, expectation, actualVersion ?? string.Empty);
+            }
+
+            foreach (string observedPackage in new[] { "openvino-genai", "accelerate", "huggingface-hub" })
+            {
+                if (packageVersions.TryGetValue(observedPackage, out string? observedVersion))
+                {
+                    result.Lines.Add($"Observed: {observedPackage} {observedVersion}");
+                }
+            }
+
+            FinishOvmsStackCheck(result, exportPython, expectations);
+            ReportOvmsStackCheckResult(result, reportToOutput);
+            return result;
+        }
+
+        private static void AddStackFailure(OvmsStackCheckResult result, string message)
+        {
+            result.CanRunPull = false;
+            result.Lines.Add($"FAIL: {message}");
+        }
+
+        private static void AddStackWarning(OvmsStackCheckResult result, string message)
+        {
+            result.HasWarnings = true;
+            result.Lines.Add($"WARN: {message}");
+        }
+
+        private static void CompareVersion(OvmsStackCheckResult result, OvmsVersionExpectation expectation, string actualVersion)
+        {
+            string normalizedName = NormalizePythonPackageName(expectation.Name);
+            if (string.IsNullOrWhiteSpace(actualVersion))
+            {
+                if (expectation.Required)
+                {
+                    AddStackFailure(result, $"{expectation.Name} is missing; expected {expectation.ExpectedVersion}.");
+                }
+                else
+                {
+                    AddStackWarning(result, $"{expectation.Name} is not installed; expected/observed working version was {expectation.ExpectedVersion}.");
+                }
+
+                return;
+            }
+
+            if (!expectation.Strict || string.IsNullOrWhiteSpace(expectation.ExpectedVersion))
+            {
+                result.Lines.Add($"INFO: {expectation.Name} {actualVersion} installed.");
+                return;
+            }
+
+            if (actualVersion.Equals(expectation.ExpectedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Lines.Add($"OK: {expectation.Name} {actualVersion}");
+                return;
+            }
+
+            string message = $"{expectation.Name} is {actualVersion}; expected {expectation.ExpectedVersion}.";
+            if (expectation.Required)
+            {
+                AddStackFailure(result, message);
+            }
+            else
+            {
+                AddStackWarning(result, message);
+            }
+
+            _ = normalizedName;
+        }
+
+        private static void AppendCommandCheckOutput(OvmsStackCheckResult result, string label, OvmsCommandResult commandResult)
+        {
+            if (!commandResult.Started)
+            {
+                AddStackFailure(result, $"{label} could not start: {commandResult.StartError}");
+                return;
+            }
+
+            if (commandResult.TimedOut)
+            {
+                AddStackFailure(result, $"{label} timed out.");
+                return;
+            }
+
+            if (commandResult.ExitCode != 0)
+            {
+                AddStackFailure(result, $"{label} exited with code {commandResult.ExitCode}.");
+            }
+            else
+            {
+                result.Lines.Add($"OK: {label}");
+            }
+
+            foreach (string line in GetFirstNonEmptyCommandLines(commandResult, maxLines: 8))
+            {
+                result.Lines.Add($"  {line}");
+            }
+        }
+
+        private static void FinishOvmsStackCheck(
+            OvmsStackCheckResult result,
+            string exportPythonPath,
+            IReadOnlyList<OvmsVersionExpectation> expectations)
+        {
+            if (!result.CanRunPull)
+            {
+                result.Lines.Add("Result: not ready for OVMS export. Fix the items above before starting a non-GGUF pull.");
+                foreach (string command in BuildOvmsStackRepairCommands(exportPythonPath, expectations))
+                {
+                    result.RepairCommands.Add(command);
+                }
+
+                return;
+            }
+
+            result.Lines.Add(result.HasWarnings
+                ? "Result: stack is usable, but review the warnings above."
+                : "Result: stack matches the known-good OVMS export setup.");
+        }
+
+        private void ReportOvmsStackCheckResult(OvmsStackCheckResult result, bool reportToOutput)
+        {
+            if (!reportToOutput)
+            {
+                return;
+            }
+
+            foreach (string line in result.Lines)
+            {
+                AppendOutput(line);
+            }
+
+            if (result.RepairCommands.Count == 0)
+            {
+                return;
+            }
+
+            AppendOutput("Recommended repair commands for the export Python:");
+            foreach (string command in result.RepairCommands)
+            {
+                AppendOutput($"  {command}");
+            }
+
+            AppendOutput("Run the repair commands in a normal Command Prompt, then click Check Stack again.");
+        }
+
+        private async Task StartOvmsPullCommandPromptAsync()
+        {
+            OvmsPullPlan plan;
+            try
+            {
+                plan = BuildOvmsPullPlan();
+                ValidateOvmsPullPlan(plan);
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"OVMS pull could not start: {ShortError(ex)}");
+                UpdateOvmsPullStatus();
+                return;
+            }
+
+            OvmsStackCheckResult versionCheck = await CheckOvmsPullVersionStackAsync(plan, reportToOutput: true);
+            if (!versionCheck.CanRunPull)
+            {
+                lblOvmsPullStatus.Text = "Version check failed. See Output.";
+                return;
+            }
+
+            StartOvmsPullCommandPrompt(plan);
+        }
+
+        private void StartOvmsPullCommandPrompt(OvmsPullPlan plan)
+        {
+            try
+            {
+                Directory.CreateDirectory(plan.ModelRepositoryPath);
+                string? logDirectory = string.IsNullOrWhiteSpace(plan.LogPath) ? null : Path.GetDirectoryName(plan.LogPath);
+                if (!string.IsNullOrWhiteSpace(logDirectory))
+                {
+                    Directory.CreateDirectory(logDirectory);
+                }
+
+                string scriptPath = WriteOvmsPullCommandScript(plan);
+                System.Diagnostics.ProcessStartInfo startInfo = new()
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/d /k {QuoteCommandPromptArgument(scriptPath)}",
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(plan.OvmsExecutable) ?? GetProjectDirectory(),
+                };
+
+                System.Diagnostics.Process.Start(startInfo);
+
+                AppendOutput("OVMS pull");
+                AppendOutput("  Started in a Command Prompt window.");
+                AppendOutput($"  Script: {scriptPath}");
+                AppendOutput($"  Command: {plan.OvmsExecutable} {FormatCommandArguments(plan.Arguments)}");
+                AppendOutput(plan.IsGgufPull
+                    ? $"  Source type: GGUF direct ({plan.GgufFilename})"
+                    : "  Source type: Hugging Face export through OVMS/Optimum");
+                AppendOutput($"  Python DLL folder added to PATH: {plan.PythonRuntimePath}");
+                if (!plan.IsGgufPull)
+                {
+                    AppendOutput($"  Export tools folder added to PATH: {plan.ExportToolsPath}");
+                }
+
+                AppendOutput($"  Model folder: {plan.ModelRepositoryPath}");
+                AppendOutput($"  Expected output: {plan.ExpectedModelFolder}");
+                if (!string.IsNullOrWhiteSpace(plan.LogPath))
+                {
+                    AppendOutput($"  Log file: {plan.LogPath}");
+                }
+
+                AppendOutput("  Close that Command Prompt when the pull is finished.");
+                lblOvmsPullStatus.Text = $"Command Prompt started for {plan.SourceModel}.";
+            }
+            catch (Exception ex)
+            {
+                AppendOutput("  OVMS pull could not open Command Prompt:");
+                foreach (string line in FormatException(ex))
+                {
+                    AppendOutput($"    {line}");
+                }
+
+                lblOvmsPullStatus.Text = "OVMS pull could not open Command Prompt. See Output for details.";
+                UpdateOvmsPullStatus();
+            }
+        }
+
+        private OvmsPullPlan BuildOvmsPullPlan()
+        {
+            string ovmsExecutable = ExpandPathText(txtOvmsExecutable.Text);
+            string pythonPath = ExpandPathText(txtOvmsPythonPath.Text);
+            string exportToolsPath = ExpandPathText(txtOvmsExportToolsPath.Text);
+            string sourceFormat = cboOvmsSourceFormat.Text.Trim();
+            bool isGgufPull = sourceFormat.Equals(OvmsSourceFormatGguf, StringComparison.OrdinalIgnoreCase);
+            string task = cboOvmsTask.Text.Trim();
+            string pipelineType = cboOvmsPipelineType.Text.Trim();
+            string sourceModel = cboOvmsSourceModel.Text.Trim();
+            string ggufFilename = txtOvmsGgufFilename.Text.Trim();
+            string modelRepositoryPath = ExpandPathText(txtOvmsModelRepository.Text);
+            string weightFormat = cboOvmsWeightFormat.Text.Trim();
+            string logPath = ExpandPathText(txtOvmsLogPath.Text);
+
+            if (string.IsNullOrWhiteSpace(ovmsExecutable))
+            {
+                throw new InvalidOperationException("Enter the OVMS program path.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pythonPath))
+            {
+                throw new InvalidOperationException("Enter the Python DLL folder.");
+            }
+
+            if (!isGgufPull && string.IsNullOrWhiteSpace(exportToolsPath))
+            {
+                throw new InvalidOperationException("Enter the export tools folder.");
+            }
+
+            if (string.IsNullOrWhiteSpace(task))
+            {
+                throw new InvalidOperationException("Choose a task.");
+            }
+
+            if (!isGgufPull && string.IsNullOrWhiteSpace(pipelineType))
+            {
+                throw new InvalidOperationException("Choose a pipeline type.");
+            }
+
+            if (string.IsNullOrWhiteSpace(sourceModel))
+            {
+                throw new InvalidOperationException("Choose a source model.");
+            }
+
+            if (string.IsNullOrWhiteSpace(modelRepositoryPath))
+            {
+                throw new InvalidOperationException("Enter the model folder.");
+            }
+
+            if (isGgufPull && string.IsNullOrWhiteSpace(ggufFilename))
+            {
+                throw new InvalidOperationException("Enter the GGUF filename from the Hugging Face repository.");
+            }
+
+            if (!isGgufPull && string.IsNullOrWhiteSpace(weightFormat))
+            {
+                throw new InvalidOperationException("Choose a weight format.");
+            }
+
+            IReadOnlyList<string> arguments = BuildOvmsPullArguments(
+                task,
+                pipelineType,
+                sourceModel,
+                ggufFilename,
+                modelRepositoryPath,
+                weightFormat,
+                logPath,
+                chkOvmsOverwrite.Checked,
+                chkOvmsDebug.Checked,
+                isGgufPull);
+
+            return new OvmsPullPlan
+            {
+                OvmsExecutable = ovmsExecutable,
+                PythonRuntimePath = pythonPath,
+                ExportToolsPath = exportToolsPath,
+                ModelRepositoryPath = modelRepositoryPath,
+                SourceModel = sourceModel,
+                GgufFilename = ggufFilename,
+                IsGgufPull = isGgufPull,
+                LogPath = logPath,
+                ExpectedModelFolder = BuildExpectedOvmsModelFolder(modelRepositoryPath, sourceModel),
+                Arguments = arguments,
+            };
+        }
+
+        private static IReadOnlyList<string> BuildOvmsPullArguments(
+            string task,
+            string pipelineType,
+            string sourceModel,
+            string ggufFilename,
+            string modelRepositoryPath,
+            string weightFormat,
+            string logPath,
+            bool overwriteModels,
+            bool debugLogging,
+            bool isGgufPull)
+        {
+            List<string> arguments = new()
+            {
+                "--pull",
+                "--task",
+                task,
+                "--source_model",
+                sourceModel,
+                "--model_repository_path",
+                modelRepositoryPath,
+            };
+
+            if (isGgufPull)
+            {
+                arguments.Add("--gguf_filename");
+                arguments.Add(ggufFilename);
+            }
+            else
+            {
+                arguments.Add("--pipeline_type");
+                arguments.Add(pipelineType);
+                arguments.Add("--weight-format");
+                arguments.Add(weightFormat);
+            }
+
+            if (overwriteModels)
+            {
+                arguments.Add("--overwrite_models");
+            }
+
+            arguments.Add("--log_level");
+            arguments.Add(debugLogging ? "DEBUG" : "INFO");
+
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                arguments.Add("--log_path");
+                arguments.Add(logPath);
+            }
+
+            return arguments;
+        }
+
+        private static void ValidateOvmsPullPlan(OvmsPullPlan plan)
+        {
+            if (!File.Exists(plan.OvmsExecutable))
+            {
+                throw new FileNotFoundException("OVMS program was not found.", plan.OvmsExecutable);
+            }
+
+            if (!Directory.Exists(plan.PythonRuntimePath))
+            {
+                throw new DirectoryNotFoundException($"Python DLL folder was not found: {plan.PythonRuntimePath}");
+            }
+
+            if (plan.IsGgufPull)
+            {
+                return;
+            }
+
+            string[] exportToolPaths = SplitPathList(plan.ExportToolsPath).ToArray();
+            if (exportToolPaths.Length == 0)
+            {
+                throw new DirectoryNotFoundException("No export tools folder was provided.");
+            }
+
+            foreach (string exportToolPath in exportToolPaths)
+            {
+                if (!Directory.Exists(exportToolPath))
+                {
+                    throw new DirectoryNotFoundException($"Export tools folder was not found: {exportToolPath}");
+                }
+            }
+        }
+
+        private static string WriteOvmsPullCommandScript(OvmsPullPlan plan)
+        {
+            string scriptPath = BuildOvmsPullCommandScriptPath(plan);
+            Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)
+                ?? throw new InvalidOperationException("No parent folder exists for the OVMS command script."));
+
+            IReadOnlyList<string> pathEntries = BuildOvmsPathPrefixEntries(plan);
+            string pathPrefix = string.Join(Path.PathSeparator, pathEntries);
+            string commandLine = BuildBatchCommandLine(plan.OvmsExecutable, plan.Arguments);
+            string? exportPython = FindOvmsExportPythonPath(pathEntries);
+
+            System.Text.StringBuilder builder = new();
+            builder.AppendLine("@echo off");
+            builder.AppendLine($"title OVMS Pull - {plan.SourceModel}");
+            builder.AppendLine($"cd /d {QuoteBatchArgument(Path.GetDirectoryName(plan.OvmsExecutable) ?? GetProjectDirectory())}");
+            builder.AppendLine($"set \"PATH={pathPrefix};%PATH%\"");
+            builder.AppendLine("echo OVMS Pull");
+            builder.AppendLine($"echo Source model: {plan.SourceModel}");
+            if (plan.IsGgufPull)
+            {
+                builder.AppendLine($"echo GGUF file: {plan.GgufFilename}");
+            }
+
+            builder.AppendLine($"echo Model folder: {plan.ModelRepositoryPath}");
+            builder.AppendLine($"echo Expected output: {plan.ExpectedModelFolder}");
+            if (!string.IsNullOrWhiteSpace(plan.LogPath))
+            {
+                builder.AppendLine($"echo Log file: {plan.LogPath}");
+            }
+
+            builder.AppendLine("echo.");
+            builder.AppendLine("echo PATH check:");
+            builder.AppendLine("where python.exe");
+            if (!plan.IsGgufPull)
+            {
+                builder.AppendLine("where optimum-cli.exe");
+                if (!string.IsNullOrWhiteSpace(exportPython))
+                {
+                    builder.AppendLine("echo.");
+                    builder.AppendLine("echo Export package versions:");
+                    builder.AppendLine($"{QuoteBatchArgument(exportPython)} --version");
+                    builder.AppendLine($"{QuoteBatchArgument(exportPython)} -m pip show transformers optimum-intel optimum openvino openvino-genai huggingface-hub accelerate");
+                }
+            }
+
+            builder.AppendLine("echo.");
+            builder.AppendLine("echo Running:");
+            builder.AppendLine($"echo {commandLine}");
+            builder.AppendLine("echo.");
+            builder.AppendLine(commandLine);
+            builder.AppendLine("set \"OVMS_EXIT=%ERRORLEVEL%\"");
+            builder.AppendLine("echo.");
+            builder.AppendLine("echo OVMS exited with code %OVMS_EXIT%.");
+            builder.AppendLine($"if exist {QuoteBatchArgument(Path.Combine(plan.ExpectedModelFolder, "graph.pbtxt"))} echo Graph found: {Path.Combine(plan.ExpectedModelFolder, "graph.pbtxt")}");
+            builder.AppendLine("echo.");
+            builder.AppendLine("echo Close this Command Prompt when you are done.");
+            builder.AppendLine("exit /b %OVMS_EXIT%");
+
+            WriteTextAtomically(scriptPath, NormalizeTextFileLineEndings(builder.ToString()));
+            return scriptPath;
+        }
+
+        private static string BuildOvmsPullCommandScriptPath(OvmsPullPlan plan)
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "OpenVINO-Workbench");
+            string sourceName = SanitizePathSegment(plan.SourceModel.Replace('/', '-').Replace('\\', '-'));
+            return Path.Combine(folder, $"ovms-pull-{sourceName}.cmd");
+        }
+
+        private static IReadOnlyList<string> BuildOvmsPathPrefixEntries(OvmsPullPlan plan)
+        {
+            List<string> entries = new()
+            {
+                plan.PythonRuntimePath,
+            };
+
+            if (!plan.IsGgufPull)
+            {
+                foreach (string exportPath in SplitPathList(plan.ExportToolsPath))
+                {
+                    entries.Add(exportPath);
+                    if (Path.GetFileName(exportPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                        .Equals("Scripts", StringComparison.OrdinalIgnoreCase)
+                        && Directory.GetParent(exportPath) is DirectoryInfo parent)
+                    {
+                        entries.Add(parent.FullName);
+                    }
+                }
+            }
+
+            return entries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                .Select(entry => Path.GetFullPath(entry))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static string? FindOvmsExportPythonPath(IEnumerable<string> pathEntries)
+        {
+            foreach (string pathEntry in pathEntries)
+            {
+                string fullEntry = Path.GetFullPath(pathEntry);
+                string directPython = Path.Combine(fullEntry, "python.exe");
+                if (File.Exists(directPython))
+                {
+                    return directPython;
+                }
+
+                if (Path.GetFileName(fullEntry.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                    .Equals("Scripts", StringComparison.OrdinalIgnoreCase)
+                    && Directory.GetParent(fullEntry) is DirectoryInfo parent)
+                {
+                    string parentPython = Path.Combine(parent.FullName, "python.exe");
+                    if (File.Exists(parentPython))
+                    {
+                        return parentPython;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string? FindExecutableOnPath(string executableName, IEnumerable<string> pathEntries)
+        {
+            foreach (string pathEntry in pathEntries)
+            {
+                string fullEntry = Path.GetFullPath(pathEntry);
+                string candidate = Path.Combine(fullEntry, executableName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static IReadOnlyList<OvmsVersionExpectation> LoadOvmsVersionExpectationsFromContext()
+        {
+            Dictionary<string, string> versions = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["python"] = "3.14.6",
+                ["transformers"] = "5.2.0",
+                ["optimum-intel"] = "2.1.0.dev0",
+                ["optimum"] = "2.2.0",
+                ["openvino"] = "2026.2.1",
+                ["huggingface-hub"] = "1.21.0",
+                ["accelerate"] = "1.14.0",
+            };
+
+            string contextPath = GetProjectContextPath();
+            if (File.Exists(contextPath))
+            {
+                ApplyKnownGlobalExportStackFromContext(File.ReadAllText(contextPath), versions);
+            }
+
+            return new[]
+            {
+                new OvmsVersionExpectation("Python", versions["python"], Required: true, Strict: true),
+                new OvmsVersionExpectation("transformers", versions["transformers"], Required: true, Strict: true),
+                new OvmsVersionExpectation("optimum-intel", versions["optimum-intel"], Required: true, Strict: true),
+                new OvmsVersionExpectation("optimum", versions["optimum"], Required: true, Strict: true),
+                new OvmsVersionExpectation("openvino", versions["openvino"], Required: true, Strict: true),
+                new OvmsVersionExpectation("huggingface-hub", versions["huggingface-hub"], Required: false, Strict: false),
+                new OvmsVersionExpectation("accelerate", versions["accelerate"], Required: false, Strict: false),
+            };
+        }
+
+        private static void ApplyKnownGlobalExportStackFromContext(string text, IDictionary<string, string> versions)
+        {
+            bool inKnownStackSection = false;
+            bool inCodeBlock = false;
+            bool readVersionTable = false;
+            foreach (string rawLine in SplitTextLines(text))
+            {
+                string line = rawLine.Trim();
+                if (line.StartsWith("##", StringComparison.Ordinal))
+                {
+                    if (inKnownStackSection)
+                    {
+                        break;
+                    }
+
+                    inKnownStackSection = line.TrimStart('#', ' ').StartsWith("Known global export stack", StringComparison.OrdinalIgnoreCase)
+                        && line.Contains("export stack", StringComparison.OrdinalIgnoreCase);
+                    inCodeBlock = false;
+                    continue;
+                }
+
+                if (line.StartsWith("Known-good global export stack:", StringComparison.OrdinalIgnoreCase)
+                    || line.StartsWith("Known global export stack:", StringComparison.OrdinalIgnoreCase))
+                {
+                    inKnownStackSection = true;
+                    inCodeBlock = false;
+                    continue;
+                }
+
+                if (!inKnownStackSection)
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("```", StringComparison.Ordinal))
+                {
+                    if (inCodeBlock && readVersionTable)
+                    {
+                        break;
+                    }
+
+                    inCodeBlock = !inCodeBlock;
+                    continue;
+                }
+
+                if (inCodeBlock)
+                {
+                    readVersionTable |= ApplyExpectedVersionLine(line, versions);
+                }
+            }
+        }
+
+        private static bool ApplyExpectedVersionLine(string line, IDictionary<string, string> versions)
+        {
+            string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                return false;
+            }
+
+            string name = NormalizePythonPackageName(parts[0]);
+            if (!versions.ContainsKey(name))
+            {
+                return false;
+            }
+
+            versions[name] = parts[1].Trim().TrimEnd(',');
+            return true;
+        }
+
+        private static async Task<OvmsCommandResult> RunOvmsCommandAsync(
+            string fileName,
+            string arguments,
+            string workingDirectory,
+            IEnumerable<string> pathPrefixEntries,
+            int timeoutMilliseconds)
+        {
+            System.Diagnostics.ProcessStartInfo startInfo = new()
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory : GetProjectDirectory(),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+
+            string pathPrefix = string.Join(
+                Path.PathSeparator,
+                pathPrefixEntries
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                    .Select(entry => Path.GetFullPath(entry))
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(pathPrefix))
+            {
+                string existingPath = startInfo.EnvironmentVariables["PATH"] ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+                startInfo.EnvironmentVariables["PATH"] = pathPrefix + Path.PathSeparator + existingPath;
+            }
+
+            using System.Diagnostics.Process process = new() { StartInfo = startInfo };
+            try
+            {
+                if (!process.Start())
+                {
+                    return new OvmsCommandResult { ExitCode = -1, StartError = "Process.Start returned false." };
+                }
+            }
+            catch (Exception ex)
+            {
+                return new OvmsCommandResult { ExitCode = -1, StartError = ex.Message };
+            }
+
+            Task<string> standardOutputTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardErrorTask = process.StandardError.ReadToEndAsync();
+            Task waitTask = process.WaitForExitAsync();
+            Task finishedTask = await Task.WhenAny(waitTask, Task.Delay(timeoutMilliseconds));
+            bool timedOut = finishedTask != waitTask;
+            if (timedOut)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // The process may have exited between the timeout and the kill attempt.
+                }
+
+                await process.WaitForExitAsync();
+            }
+            else
+            {
+                await waitTask;
+            }
+
+            string standardOutput = await standardOutputTask;
+            string standardError = await standardErrorTask;
+            return new OvmsCommandResult
+            {
+                ExitCode = timedOut ? -1 : process.ExitCode,
+                TimedOut = timedOut,
+                StandardOutput = standardOutput,
+                StandardError = standardError,
+            };
+        }
+
+        private static string CombineCommandOutput(OvmsCommandResult commandResult)
+        {
+            return string.Join(
+                Environment.NewLine,
+                new[] { commandResult.StandardOutput, commandResult.StandardError }.Where(text => !string.IsNullOrWhiteSpace(text)));
+        }
+
+        private static IEnumerable<string> GetFirstNonEmptyCommandLines(OvmsCommandResult commandResult, int maxLines)
+        {
+            return SplitTextLines(CombineCommandOutput(commandResult))
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Take(maxLines);
+        }
+
+        private static string ParsePythonVersion(string commandOutput)
+        {
+            foreach (string rawLine in SplitTextLines(commandOutput))
+            {
+                string line = rawLine.Trim();
+                if (line.StartsWith("Python ", StringComparison.OrdinalIgnoreCase))
+                {
+                    return line["Python ".Length..].Trim();
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static Dictionary<string, string> ParsePipShowVersions(string commandOutput)
+        {
+            Dictionary<string, string> versions = new(StringComparer.OrdinalIgnoreCase);
+            string currentName = string.Empty;
+            string currentVersion = string.Empty;
+
+            foreach (string rawLine in SplitTextLines(commandOutput))
+            {
+                string line = rawLine.Trim();
+                if (line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                {
+                    StoreCurrentPackage();
+                    currentName = NormalizePythonPackageName(line["Name:".Length..].Trim());
+                    currentVersion = string.Empty;
+                    continue;
+                }
+
+                if (line.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentVersion = line["Version:".Length..].Trim();
+                }
+            }
+
+            StoreCurrentPackage();
+            return versions;
+
+            void StoreCurrentPackage()
+            {
+                if (!string.IsNullOrWhiteSpace(currentName) && !string.IsNullOrWhiteSpace(currentVersion))
+                {
+                    versions[currentName] = currentVersion;
+                }
+            }
+        }
+
+        private static string NormalizePythonPackageName(string name)
+        {
+            return name.Trim().Replace('_', '-').ToLowerInvariant();
+        }
+
+        private static IReadOnlyList<string> BuildOvmsStackRepairCommands(
+            string exportPythonPath,
+            IReadOnlyList<OvmsVersionExpectation> expectations)
+        {
+            string python = string.IsNullOrWhiteSpace(exportPythonPath)
+                ? "python"
+                : QuoteCommandPromptArgument(exportPythonPath);
+            Dictionary<string, OvmsVersionExpectation> expectationsByName = expectations
+                .ToDictionary(expectation => NormalizePythonPackageName(expectation.Name), StringComparer.OrdinalIgnoreCase);
+            string[] pipPackageOrder =
+            {
+                "transformers",
+                "optimum",
+                "openvino",
+            };
+
+            List<string> packages = new();
+            foreach (string packageName in pipPackageOrder)
+            {
+                if (expectationsByName.TryGetValue(packageName, out OvmsVersionExpectation? expectation)
+                    && !string.IsNullOrWhiteSpace(expectation.ExpectedVersion))
+                {
+                    packages.Add(QuoteCommandPromptArgument($"{packageName}=={expectation.ExpectedVersion}"));
+                }
+            }
+
+            List<string> commands = new();
+            if (packages.Count > 0)
+            {
+                commands.Add($"{python} -m pip install --upgrade --force-reinstall {string.Join(" ", packages)}");
+            }
+
+            commands.Add($"{python} -m pip install --upgrade --force-reinstall --no-deps \"https://github.com/huggingface/optimum-intel/archive/refs/heads/main.zip\"");
+            return commands;
+        }
+
+        private static IEnumerable<string> SplitPathList(string pathList)
+        {
+            return pathList
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                .Select(path => Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')))
+                .Where(path => !string.IsNullOrWhiteSpace(path));
+        }
+
+        private static string BuildBatchCommandLine(string executable, IEnumerable<string> arguments)
+        {
+            return QuoteBatchArgument(executable) + " " + string.Join(" ", arguments.Select(QuoteBatchArgument));
+        }
+
+        private static string QuoteBatchArgument(string value)
+        {
+            return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+        }
+
+        private static string QuoteCommandPromptArgument(string value)
+        {
+            return $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+        }
+
+        private static string BuildExpectedOvmsModelFolder(string modelRepositoryPath, string sourceModel)
+        {
+            string path = Path.GetFullPath(modelRepositoryPath);
+            string[] parts = sourceModel
+                .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(SanitizePathSegment)
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .ToArray();
+
+            if (parts.Length == 0)
+            {
+                return Path.Combine(path, "model");
+            }
+
+            foreach (string part in parts)
+            {
+                path = Path.Combine(path, part);
+            }
+
+            return path;
+        }
+
+        private static string ExpandPathText(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
+        }
+
+        #endregion
+
+        #region Convert
         private sealed class ModelCompileResult
         {
             public required string ModelPath { get; init; }
@@ -8654,10 +10264,9 @@ namespace WorkStationC_
             public string Note { get; init; } = string.Empty;
         }
 
-        private sealed class IrConversionAttempt
+        private enum ConvertModelSourceKind
         {
-            public IrConversionResult? Result { get; init; }
-            public Exception? Error { get; init; }
+            OpenVinoIr,
         }
 
         private sealed class ConvertModelSelectionEntry
@@ -8665,9 +10274,11 @@ namespace WorkStationC_
             public required string Id { get; init; }
             public required string DisplayName { get; init; }
             public required string ModelDirectory { get; init; }
-            public required string GgufPath { get; init; }
+            public required string SourcePath { get; init; }
             public string Revision { get; init; } = "downloaded";
             public bool IsLocal { get; init; }
+            public ConvertModelSourceKind Kind { get; init; } = ConvertModelSourceKind.OpenVinoIr;
+            public bool IsOpenVinoIr => Kind == ConvertModelSourceKind.OpenVinoIr;
 
             public override string ToString()
             {
@@ -8676,10 +10287,9 @@ namespace WorkStationC_
         }
 
         private void btnRefreshConvertModels_Click(object? sender, EventArgs e) => RefreshConvertModelSelection(reportStatus: true);
-        private async void btnConvertToIr_Click(object? sender, EventArgs e) => await ConvertSelectedGgufOutputsAsync();
+        private async void btnConvertToIr_Click(object? sender, EventArgs e) => await CreateBlobFromSelectedIrAsync();
         private void cboConvertSourceModel_SelectedIndexChanged(object? sender, EventArgs e) => SelectConvertModelFromCombo();
         private void chkConvertBlob_CheckedChanged(object? sender, EventArgs e) => UpdateConvertActionButtons();
-        private void chkConvertIr_CheckedChanged(object? sender, EventArgs e) => UpdateConvertActionButtons();
 
         private void ShowConvertHelp()
         {
@@ -8690,27 +10300,19 @@ namespace WorkStationC_
             AppendOutput("This app writes blobs beside the model's main folder: ModelName\\main\\... and ModelName\\GPU\\model.blob.");
             AppendOutput("Benefit: the model is already compiled for that target, so later loads can start faster and use the OpenVINO settings chosen during export.");
             AppendOutput("Tradeoff: a blob is not a portable source model. It is tied to the selected target and the OpenVINO runtime version used to create it.");
-            AppendOutput("Convert lists GGUF files from each model's gguf folder.");
-            AppendOutput("Refresh Models scans each model's gguf folder first, then checks main for misplaced .gguf files.");
-            AppendOutput("If Refresh Models finds a .gguf file in a model's main folder, it moves that file into a gguf folder beside main.");
-            AppendOutput("Already converted GGUF files are hidden when the model's main folder already has matching OpenVINO .xml/.bin files.");
-            AppendOutput("Choose .xml/.bin to save a supported GGUF model as OpenVINO IR through OpenVINO GenAI.");
-            AppendOutput("GGUF conversion is limited by the bundled GenAI reader. Unsupported architectures, tokenizers, or quantization types may still run in other tools but fail to save as IR here.");
-            AppendOutput("OpenVINO GenAI can also run supported GGUF files directly, so conversion is optional unless you specifically need saved IR or a blob.");
-            AppendOutput("Eligible GGUF files are text chat models that the bundled OpenVINO GenAI GGUF reader can open.");
-            AppendOutput("OpenVINO GenAI support depends on the model architecture, tokenizer, and quantization type stored in the GGUF.");
-            AppendOutput("A GGUF file may work in llama.cpp or Ollama but still fail here if OpenVINO GenAI does not support that GGUF layout.");
+            AppendOutput("Convert lists OpenVINO .xml/.bin models from the model root.");
+            AppendOutput("Choose an existing .xml/.bin entry and .blob to compile it directly for the current Workstation target.");
+            AppendOutput("GGUF pulls now belong on OVMS Pull with --gguf_filename instead of Convert.");
             AppendOutput("If you use a native OpenVINO IR download, keep tokenizer files such as openvino_tokenizer.xml and openvino_detokenizer.xml beside the model.");
             AppendOutput("Choose .blob to compile the saved IR for the current Workstation target.");
-            AppendOutput("The app creates IR first because blob export needs a Core-readable model file.");
             AppendOutput("Blob output is written beside the model's main folder, such as ModelName\\GPU\\model.blob or ModelName\\MULTI\\model.blob.");
             AppendOutput("Formats that do not convert here");
-            AppendOutput("  .safetensors, .pt, .pth: weight/checkpoint files. They usually need Python/Optimum/OpenVINO conversion to IR before this app can export a blob.");
+            AppendOutput("  .gguf: pull directly with OVMS Pull and a GGUF filename.");
+            AppendOutput("  .safetensors, .pt, .pth, .onnx, .pb, .pdmodel: planned for OVMS/OpenVINO pull or converter workflows, not this blob-only tab.");
             AppendOutput("  .json, .model, .txt, .labels, .csv: support files such as config, tokenizer, labels, or notes. Keep them with the model, but they are not compiled into a blob by themselves.");
             AppendOutput("  .bin by itself: usually weights only. It helps when paired with the matching .xml, but it is not a standalone Convert input.");
-            AppendOutput("  .h5, .keras, .ckpt, .npz, .npy: training or data formats. Convert them elsewhere first, then bring the OpenVINO-readable result back here.");
             AppendOutput("  .engine and .plan: TensorRT/NVIDIA compiled formats. They do not help OpenVINO on Intel GPUs.");
-            AppendOutput("Rule of thumb: choose the Workstation target you actually plan to run before creating a blob. Keep the original GGUF too, because blobs may need to be regenerated after changing devices or OpenVINO versions.");
+            AppendOutput("Rule of thumb: choose the Workstation target you actually plan to run before creating a blob. Blobs may need to be regenerated after changing devices or OpenVINO versions.");
             AppendOutput(string.Empty);
         }
 
@@ -8738,11 +10340,11 @@ namespace WorkStationC_
             if (entries.Count == 0)
             {
                 cboConvertSourceModel.Text = string.Empty;
-                lblIrPlaceholder.Text = "No unconverted GGUF models found under the model root.";
-                lblModelsStatus.Text = "Click Refresh Models after downloading GGUF files.";
+                lblIrPlaceholder.Text = "No OpenVINO .xml/.bin models found under the model root.";
+                lblModelsStatus.Text = "Click Refresh Models after downloading model files.";
                 if (reportStatus)
                 {
-                    AppendOutput("Convert: no unconverted GGUF models found under the model root.");
+                    AppendOutput("Convert: no OpenVINO .xml/.bin models found under the model root.");
                 }
 
                 UpdateConvertActionButtons();
@@ -8756,7 +10358,7 @@ namespace WorkStationC_
 
             if (reportStatus)
             {
-                AppendOutput($"Convert: found {entries.Count} GGUF file(s).");
+                AppendOutput($"Convert: found {entries.Count} OpenVINO .xml/.bin model(s).");
             }
 
             UpdateConvertActionButtons();
@@ -8779,23 +10381,24 @@ namespace WorkStationC_
                     continue;
                 }
 
-                foreach (string ggufPath in EnumerateConvertGgufFilesForModel(modelRoot, fullModelFolder))
+                foreach (string irXmlPath in EnumerateConvertOpenVinoIrFilesForModel(modelRoot, fullModelFolder))
                 {
-                    string fullGgufPath = Path.GetFullPath(ggufPath);
-                    string relativePath = Path.GetRelativePath(modelRoot, fullGgufPath);
+                    string fullIrXmlPath = Path.GetFullPath(irXmlPath);
+                    string relativePath = Path.GetRelativePath(modelRoot, fullIrXmlPath);
                     yield return new ConvertModelSelectionEntry
                     {
-                        Id = $"gguf:{relativePath}",
-                        DisplayName = BuildGgufConvertDisplayName(modelRoot, fullGgufPath),
+                        Id = $"ir:{relativePath}",
+                        DisplayName = BuildIrConvertDisplayName(modelRoot, fullIrXmlPath),
                         ModelDirectory = fullModelFolder,
-                        GgufPath = fullGgufPath,
+                        SourcePath = fullIrXmlPath,
                         Revision = "model",
+                        Kind = ConvertModelSourceKind.OpenVinoIr,
                     };
                 }
             }
         }
 
-        private static IEnumerable<string> EnumerateConvertGgufFilesForModel(string modelRoot, string modelFolder)
+        private static IEnumerable<string> EnumerateConvertOpenVinoIrFilesForModel(string modelRoot, string modelFolder)
         {
             string fullModelFolder = Path.GetFullPath(modelFolder);
             if (!IsPathUnder(fullModelFolder, modelRoot))
@@ -8803,126 +10406,24 @@ namespace WorkStationC_
                 yield break;
             }
 
-            MoveMainGgufFilesIntoGgufFolder(fullModelFolder);
-
-            string ggufFolder = Path.Combine(fullModelFolder, "gguf");
-            if (!Directory.Exists(ggufFolder))
+            foreach (string xmlPath in Directory.EnumerateFiles(fullModelFolder, "*.xml", SearchOption.AllDirectories))
             {
-                yield break;
-            }
-
-            foreach (string ggufPath in Directory.EnumerateFiles(ggufFolder, "*.gguf", SearchOption.AllDirectories))
-            {
-                string fullGgufPath = Path.GetFullPath(ggufPath);
-                if (IsGgufAlreadyConverted(fullModelFolder, fullGgufPath))
+                string fullXmlPath = Path.GetFullPath(xmlPath);
+                if (!IsConvertBlobSourceXml(fullXmlPath))
                 {
                     continue;
                 }
 
-                yield return fullGgufPath;
+                yield return fullXmlPath;
             }
         }
 
-        private static void MoveMainGgufFilesIntoGgufFolder(string modelFolder)
+        private static bool IsConvertBlobSourceXml(string xmlPath)
         {
-            string mainFolder = Path.Combine(modelFolder, "main");
-            if (!Directory.Exists(mainFolder))
-            {
-                return;
-            }
-
-            string ggufFolder = Path.Combine(modelFolder, "gguf");
-            foreach (string sourcePath in Directory.EnumerateFiles(mainFolder, "*.gguf", SearchOption.AllDirectories))
-            {
-                string relativePath = Path.GetRelativePath(mainFolder, sourcePath);
-                string destinationPath = Path.GetFullPath(Path.Combine(ggufFolder, relativePath));
-                if (!IsPathUnder(destinationPath, ggufFolder))
-                {
-                    throw new InvalidOperationException($"Refusing to move GGUF outside the model gguf folder: {sourcePath}");
-                }
-
-                destinationPath = GetAvailableGgufMovePath(destinationPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? ggufFolder);
-                File.Move(sourcePath, destinationPath);
-            }
-        }
-
-        private static string GetAvailableGgufMovePath(string destinationPath)
-        {
-            if (!File.Exists(destinationPath))
-            {
-                return destinationPath;
-            }
-
-            string folder = Path.GetDirectoryName(destinationPath) ?? string.Empty;
-            string name = Path.GetFileNameWithoutExtension(destinationPath);
-            string extension = Path.GetExtension(destinationPath);
-            for (int index = 1; index < 1000; index++)
-            {
-                string candidate = Path.Combine(folder, $"{name}-{index}{extension}");
-                if (!File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            throw new IOException($"Could not choose a unique GGUF destination for {destinationPath}.");
-        }
-
-        private static bool IsGgufAlreadyConverted(string modelFolder, string ggufPath)
-        {
-            string mainFolder = Path.Combine(modelFolder, "main");
-            if (!Directory.Exists(mainFolder))
-            {
-                return false;
-            }
-
-            if (ConversionManifestMatchesGguf(mainFolder, ggufPath))
-            {
-                return true;
-            }
-
-            string ggufModelName = Path.GetFileNameWithoutExtension(ggufPath);
-            string[] preferredXmlPaths =
-            {
-                Path.Combine(mainFolder, "openvino_model.xml"),
-                Path.Combine(mainFolder, $"{ggufModelName}.xml"),
-            };
-
-            return preferredXmlPaths.Any(HasMatchingIrBin);
-        }
-
-        private static bool ConversionManifestMatchesGguf(string mainFolder, string ggufPath)
-        {
-            string manifestPath = Path.Combine(mainFolder, "ir-conversion.json");
-            if (!File.Exists(manifestPath))
-            {
-                return false;
-            }
-
-            try
-            {
-                using FileStream stream = File.OpenRead(manifestPath);
-                using System.Text.Json.JsonDocument manifest = System.Text.Json.JsonDocument.Parse(stream);
-                if (!manifest.RootElement.TryGetProperty("sourcePath", out System.Text.Json.JsonElement sourcePathElement))
-                {
-                    return false;
-                }
-
-                string? sourcePath = sourcePathElement.GetString();
-                if (string.IsNullOrWhiteSpace(sourcePath))
-                {
-                    return false;
-                }
-
-                bool sameSource = Path.GetFullPath(sourcePath).Equals(Path.GetFullPath(ggufPath), StringComparison.OrdinalIgnoreCase)
-                    || Path.GetFileName(sourcePath).Equals(Path.GetFileName(ggufPath), StringComparison.OrdinalIgnoreCase);
-                return sameSource && Directory.EnumerateFiles(mainFolder, "*.xml", SearchOption.TopDirectoryOnly).Any(HasMatchingIrBin);
-            }
-            catch
-            {
-                return false;
-            }
+            return File.Exists(xmlPath)
+                && Path.GetExtension(xmlPath).Equals(".xml", StringComparison.OrdinalIgnoreCase)
+                && !IsOpenVinoSupportXml(xmlPath)
+                && File.Exists(Path.ChangeExtension(xmlPath, ".bin"));
         }
 
         private static bool HasMatchingIrBin(string xmlPath)
@@ -8930,40 +10431,34 @@ namespace WorkStationC_
             return File.Exists(xmlPath) && File.Exists(Path.ChangeExtension(xmlPath, ".bin"));
         }
 
-        private static string GetConvertModelFolderForGguf(string modelRoot, string ggufPath)
+        private static string BuildIrConvertDisplayName(string modelRoot, string xmlPath)
         {
-            string fullGgufPath = Path.GetFullPath(ggufPath);
-            string? mainFolder = FindContainingMainFolder(fullGgufPath, modelRoot);
+            string modelFolder = GetConvertModelFolderForOpenVinoIr(modelRoot, xmlPath);
+            string modelName = Path.GetFileName(modelFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            string relativeFile = Path.GetRelativePath(modelFolder, xmlPath);
+            return string.IsNullOrWhiteSpace(modelName)
+                ? $"{relativeFile} (.xml/.bin)"
+                : $"{modelName} - {relativeFile} (.xml/.bin)";
+        }
+
+        private static string GetConvertModelFolderForOpenVinoIr(string modelRoot, string xmlPath)
+        {
+            string fullXmlPath = Path.GetFullPath(xmlPath);
+            string? mainFolder = FindContainingMainFolder(fullXmlPath, modelRoot);
             if (mainFolder is not null && Directory.GetParent(mainFolder) is DirectoryInfo modelFolder)
             {
                 return modelFolder.FullName;
             }
 
-            string relativePath = Path.GetRelativePath(modelRoot, fullGgufPath);
+            string relativePath = Path.GetRelativePath(modelRoot, fullXmlPath);
             string[] segments = relativePath
                 .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length == 1)
-            {
-                string modelName = SanitizePathSegment(Path.GetFileNameWithoutExtension(fullGgufPath));
-                return Path.Combine(modelRoot, string.IsNullOrWhiteSpace(modelName) ? "model" : modelName);
-            }
-
             if (segments.Length > 1 && !IsReservedModelRootFolder(segments[0]))
             {
                 return Path.Combine(modelRoot, segments[0]);
             }
 
-            return Path.GetDirectoryName(fullGgufPath) ?? modelRoot;
-        }
-
-        private static string BuildGgufConvertDisplayName(string modelRoot, string ggufPath)
-        {
-            string modelFolder = GetConvertModelFolderForGguf(modelRoot, ggufPath);
-            string modelName = Path.GetFileName(modelFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            string relativeFile = Path.GetRelativePath(modelFolder, ggufPath);
-            return string.IsNullOrWhiteSpace(modelName)
-                ? relativeFile
-                : $"{modelName} - {relativeFile}";
+            return Path.GetDirectoryName(fullXmlPath) ?? modelRoot;
         }
 
         private void SelectConvertModelFromCombo()
@@ -8971,256 +10466,50 @@ namespace WorkStationC_
             ConvertModelSelectionEntry? entry = GetSelectedConvertModelEntry();
             if (entry is null)
             {
-                lblIrPlaceholder.Text = "Select a GGUF model, choose outputs, then convert.";
+                lblIrPlaceholder.Text = "Select an OpenVINO .xml/.bin model, then create .blob.";
                 UpdateConvertActionButtons();
                 return;
             }
 
-            lblIrPlaceholder.Text = $"Selected GGUF model: {entry.GgufPath}";
-            lblModelsStatus.Text = $"Ready to convert {Path.GetFileName(entry.GgufPath)}.";
+            chkConvertBlob.Checked = true;
+            lblIrPlaceholder.Text = $"Selected OpenVINO IR model: {entry.SourcePath}";
+            lblModelsStatus.Text = $"Ready to create .blob from {Path.GetFileName(entry.SourcePath)}.";
             UpdateConvertActionButtons();
         }
 
         private void UpdateConvertActionButtons()
         {
             ConvertModelSelectionEntry? entry = GetSelectedConvertModelEntry();
-            bool hasModel = entry is not null && File.Exists(entry.GgufPath);
-            bool hasOutput = chkConvertBlob.Checked || chkConvertIr.Checked;
-            btnConvertToIr.Enabled = hasModel && hasOutput;
+            btnConvertToIr.Text = "Create Blob";
+
+            bool hasModel = entry is not null && File.Exists(entry.SourcePath);
+            btnConvertToIr.Enabled = hasModel && chkConvertBlob.Checked;
         }
 
-        private async Task ConvertSelectedGgufOutputsAsync()
+        private async Task CreateBlobFromSelectedIrAsync()
         {
             ConvertModelSelectionEntry? entry = GetSelectedConvertModelEntry();
             if (entry is null)
             {
-                AppendOutput("Convert: select a GGUF model first.");
+                AppendOutput("Convert: select an OpenVINO .xml/.bin model first.");
                 return;
             }
 
-            bool createBlob = chkConvertBlob.Checked;
-            bool createIr = chkConvertIr.Checked;
-            if (!createBlob && !createIr)
+            if (!chkConvertBlob.Checked)
             {
-                AppendOutput("Convert: choose .blob, .xml/.bin, or both.");
+                AppendOutput("Convert: choose .blob.");
                 return;
             }
 
-            string device = GetPrimaryCompileTarget();
-            if (createBlob && !TryGetPrimaryCompileTarget(out device))
-            {
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(device))
-            {
-                device = "CPU";
-            }
-
-            IrConversionResult? irResult = await ConvertSelectedGgufToIrAsync(entry, entry.GgufPath, device);
-            if (irResult is null)
+            if (!TryGetPrimaryCompileTarget(out string device))
             {
                 return;
             }
 
-            if (createBlob)
-            {
-                await ExportGgufIrBlobForTargetAsync(entry, irResult.PrimaryXml, device);
-            }
+            await ExportIrBlobForTargetAsync(entry, entry.SourcePath, device);
         }
 
-        private async Task<IrConversionResult?> ConvertSelectedGgufToIrAsync(ConvertModelSelectionEntry entry, string ggufPath, string device)
-        {
-            if (string.IsNullOrWhiteSpace(device))
-            {
-                device = "CPU";
-            }
-
-            if (!EnsureOpenVinoGenAiRuntimeAvailable(out string reason))
-            {
-                AppendOutput($"Convert to .xml/.bin: OpenVINO GenAI unavailable: {reason}");
-                return null;
-            }
-
-            CancellationTokenSource? operation = await TryBeginLongOperationAsync("Converting GGUF to .xml/.bin...", allowCancel: true);
-            if (operation is null)
-            {
-                return null;
-            }
-
-            CancellationToken cancellationToken = operation.Token;
-            btnConvertToIr.Enabled = false;
-            string oldStatus = lblModelsStatus.Text;
-            lblModelsStatus.Text = "Converting GGUF to .xml/.bin...";
-            SetActivityState("Loading GGUF through OpenVINO GenAI...", allowCancel: true);
-            IrConversionResult? result = null;
-
-            try
-            {
-                AppendOutput("Convert to .xml/.bin");
-                AppendOutput($"  Source: {ggufPath}");
-                AppendOutput($"  Device: {device}");
-                AppendOutput("  Method: OpenVINO GenAI save path.");
-
-                Progress<string> progress = new(message => SetActivityState(message, allowCancel: true));
-                IrConversionAttempt attempt = await TryConvertGgufToIrWithGenAiAsync(
-                    entry,
-                    ggufPath,
-                    device,
-                    progress,
-                    cancellationToken);
-
-                if (attempt.Result is null && attempt.Error is not null && !device.Equals("CPU", StringComparison.OrdinalIgnoreCase))
-                {
-                    AppendOutput($"  OpenVINO GenAI could not open this GGUF on {device}:");
-                    foreach (string line in FormatException(attempt.Error))
-                    {
-                        AppendOutput($"    {line}");
-                    }
-
-                    AppendGgufIrFailureNote(attempt.Error, "The selected device path failed before .xml/.bin files could be saved.");
-                    AppendOutput("  Retrying .xml/.bin save on CPU. Blob export will still use the Workstation target if requested.");
-                    SetActivityState("Retrying GGUF conversion on CPU...", allowCancel: true);
-                    attempt = await TryConvertGgufToIrWithGenAiAsync(
-                        entry,
-                        ggufPath,
-                        "CPU",
-                        progress,
-                        cancellationToken);
-                }
-
-                if (attempt.Result is null)
-                {
-                    AppendOutput("  Convert to .xml/.bin failed:");
-                    if (attempt.Error is not null)
-                    {
-                        foreach (string line in FormatException(attempt.Error))
-                        {
-                            AppendOutput($"    {line}");
-                        }
-                    }
-                    else
-                    {
-                        AppendOutput("    OpenVINO GenAI did not return a conversion result.");
-                    }
-
-                    AppendGgufIrFailureNote(attempt.Error, "OpenVINO GenAI could not create an LLM pipeline for this GGUF.");
-                    result = null;
-                    return null;
-                }
-
-                result = attempt.Result;
-
-                AppendOutput($"  Destination: {result.OutputFolder}");
-                AppendOutput($"  Primary XML: {result.PrimaryXml}");
-                if (!string.IsNullOrWhiteSpace(result.PrimaryBin))
-                {
-                    AppendOutput($"  Primary BIN: {result.PrimaryBin}");
-                }
-
-                AppendOutput($"  Convert time: {result.ConvertMilliseconds:N0} ms");
-                if (!string.IsNullOrWhiteSpace(result.Note))
-                {
-                    AppendOutput($"  Note: {result.Note}");
-                }
-
-                AppendOutput("  Files:");
-                foreach (string file in result.OutputFiles)
-                {
-                    AppendOutput($"    {file}");
-                }
-
-                txtInferModel.Text = result.OutputFolder;
-                RefreshConvertModelSelection(entry.Id);
-                lblIrPlaceholder.Text = $"Created IR model: {result.OutputFolder}";
-                AppendOutput("  Status: .xml/.bin files are ready.");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendOutput("  Convert to .xml/.bin canceled.");
-                result = null;
-            }
-            catch (Exception ex)
-            {
-                AppendOutput("  Convert to .xml/.bin failed:");
-                foreach (string line in FormatException(ex))
-                {
-                    AppendOutput($"    {line}");
-                }
-
-                AppendGgufIrFailureNote(ex, "An unexpected conversion step failed before .xml/.bin files were ready.");
-                result = null;
-            }
-            finally
-            {
-                lblModelsStatus.Text = oldStatus;
-                UpdateConvertActionButtons();
-                FinishLongOperation();
-            }
-
-            return result;
-        }
-
-        private async Task<IrConversionAttempt> TryConvertGgufToIrWithGenAiAsync(
-            ConvertModelSelectionEntry entry,
-            string ggufPath,
-            string device,
-            IProgress<string>? progress,
-            CancellationToken cancellationToken)
-        {
-            return await Task.Run(() =>
-            {
-                try
-                {
-                    return new IrConversionAttempt
-                    {
-                        Result = ConvertGgufToIrWithGenAi(entry.ModelDirectory, ggufPath, device, progress, cancellationToken),
-                    };
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    return new IrConversionAttempt { Error = ex };
-                }
-            }, cancellationToken);
-        }
-
-        private void AppendGgufIrFailureNote(Exception? exception, string summary)
-        {
-            OpenVinoSharp.OVException? openVinoException = FindOpenVinoException(exception);
-            if (openVinoException is not null)
-            {
-                AppendOutput($"  Error note: {summary} OpenVINO returned {FormatOpenVinoStatus(openVinoException.Status)}.");
-                if (openVinoException.Status == OpenVinoSharp.ExceptionStatus.UNKNOW_EXCEPTION)
-                {
-                    AppendOutput("  Error note: the native runtime did not provide a more specific message for this failure.");
-                }
-            }
-            else
-            {
-                AppendOutput($"  Error note: {summary}");
-            }
-
-            AppendOutput("  Error note: this usually means the bundled OpenVINO GenAI GGUF reader does not support this model architecture, tokenizer, or quantization.");
-            AppendOutput("  Error note: OpenVINO GenAI can run supported GGUF files directly, so conversion is optional unless you need saved IR or a blob.");
-            AppendOutput("  Error note: the standard OpenVINO converter does not use GGUF as a normal input; use GenAI/Optimum or download a native OpenVINO IR model.");
-            AppendOutput("  Error note: native IR text models need their tokenizer files beside the model, such as openvino_tokenizer.xml and openvino_detokenizer.xml when provided.");
-            AppendOutput("  Keep the .gguf until a generated .xml/.bin folder loads and generates correctly.");
-        }
-
-        private static OpenVinoSharp.OVException? FindOpenVinoException(Exception? exception)
-        {
-            for (Exception? current = exception; current is not null; current = current.InnerException)
-            {
-                if (current is OpenVinoSharp.OVException openVinoException)
-                {
-                    return openVinoException;
-                }
-            }
-
-            return null;
-        }
-
-        private async Task<string?> ExportGgufIrBlobForTargetAsync(ConvertModelSelectionEntry entry, string sourceXml, string device)
+        private async Task<string?> ExportIrBlobForTargetAsync(ConvertModelSelectionEntry entry, string sourceXml, string device)
         {
             string modelFolder = GetOptimizedBlobModelFolder(entry.ModelDirectory, sourceXml);
             string deviceFolder = GetOptimizedBlobDeviceFolder(entry.ModelDirectory, sourceXml, device);
@@ -9272,7 +10561,8 @@ namespace WorkStationC_
                 {
                     exportedAtUtc = DateTime.UtcNow,
                     sourcePath = sourceXml,
-                    originalGguf = entry.GgufPath,
+                    originalSource = entry.SourcePath,
+                    sourceKind = entry.Kind.ToString(),
                     format = "OpenVINO compiled model blob",
                     device,
                     deviceFolder = Path.GetFileName(deviceFolder),
@@ -9315,73 +10605,6 @@ namespace WorkStationC_
                 UpdateConvertActionButtons();
                 FinishLongOperation();
             }
-        }
-
-        private IrConversionResult ConvertGgufToIrWithGenAi(
-            string sourceModelFolder,
-            string ggufPath,
-            string device,
-            IProgress<string>? progress,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            string sourceDirectory = Path.GetDirectoryName(ggufPath)
-                ?? throw new InvalidOperationException($"No parent directory exists for: {ggufPath}");
-            string outputFolder = GetIrOutputMainFolder(sourceModelFolder, ggufPath);
-
-            DateTime markerUtc = DateTime.UtcNow.AddSeconds(-2);
-            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            DisposeCachedGenAiPipeline();
-            progress?.Report("Building OpenVINO model from GGUF...");
-
-            using (OpenVinoSharp.GenAI.LLMPipeline pipeline = new(
-                ggufPath,
-                device,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["enable_save_ov_model"] = "true",
-                }))
-            using (OpenVinoSharp.GenAI.GenerationConfig config = new())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                config.SetMaxNewTokens(10);
-                config.SetDoSample(false);
-                progress?.Report("Saving .xml/.bin files...");
-                using OpenVinoSharp.GenAI.DecodedResults _ = pipeline.Generate(
-                    "Hello",
-                    config,
-                    text => cancellationToken.IsCancellationRequested || _longOperationCancelRequested
-                        ? OpenVinoSharp.GenAI.StreamingStatus.Cancel
-                        : OpenVinoSharp.GenAI.StreamingStatus.Running);
-            }
-
-            stopwatch.Stop();
-            cancellationToken.ThrowIfCancellationRequested();
-
-            IReadOnlyList<string> generatedFiles = FindGgufIrFiles(sourceDirectory, ggufPath, markerUtc);
-            string? primaryXml = FindPrimaryIrXml(generatedFiles, sourceDirectory, ggufPath);
-            if (primaryXml is null)
-            {
-                throw new InvalidOperationException("OpenVINO GenAI completed generation, but no matching .xml/.bin files were found beside the GGUF file.");
-            }
-
-            IReadOnlyList<string> outputFiles = CopyIrFilesToOutputFolder(generatedFiles, outputFolder);
-            string outputPrimaryXml = Path.Combine(outputFolder, Path.GetFileName(primaryXml));
-            string outputPrimaryBin = FindMatchingBinPath(outputPrimaryXml) ?? string.Empty;
-            WriteIrConversionManifest(outputFolder, ggufPath, "OpenVINO GenAI GGUF save", outputFiles);
-
-            return new IrConversionResult
-            {
-                SourcePath = ggufPath,
-                OutputFolder = outputFolder,
-                PrimaryXml = outputPrimaryXml,
-                PrimaryBin = outputPrimaryBin,
-                OutputFiles = outputFiles,
-                ConvertMilliseconds = stopwatch.ElapsedMilliseconds,
-                Note = outputFolder.Equals(sourceDirectory, StringComparison.OrdinalIgnoreCase)
-                    ? "OpenVINO GenAI saved the files beside the GGUF file."
-                    : "OpenVINO GenAI saved beside the GGUF file; the app copied the IR files into the model's main folder.",
-            };
         }
 
         private async Task PrepareCoreReadableModelAsIrAsync(ConvertModelSelectionEntry entry, string sourcePath)
@@ -9480,7 +10703,7 @@ namespace WorkStationC_
             string? sourcePath = ResolveSelectedOpenVinoModelPath(logMissing: false);
             if (entry is null || sourcePath is null)
             {
-                AppendOutput("Convert: select a GGUF model and choose .xml/.bin or .blob.");
+                AppendOutput("Convert: select an OpenVINO .xml/.bin model.");
                 return;
             }
 
@@ -9577,19 +10800,12 @@ namespace WorkStationC_
 
         private async Task CompileSelectedOpenVinoModelAsync()
         {
-            string? ggufPath = ResolveSelectedGgufModelPath();
-            if (ggufPath is not null)
-            {
-                await TestSelectedGgufModelAsync(ggufPath);
-                return;
-            }
-
             string? modelPath = ResolveSelectedOpenVinoModelPath();
             IReadOnlyList<string> targets = GetSelectedCompileTargets();
 
             if (modelPath is null)
             {
-                AppendOutput("Convert: select a GGUF model and choose .xml/.bin or .blob.");
+                AppendOutput("Convert: select an OpenVINO .xml/.bin model.");
                 return;
             }
 
@@ -9677,18 +10893,11 @@ namespace WorkStationC_
 
         private async Task LoadSelectedOpenVinoModelAsync()
         {
-            string? ggufPath = ResolveSelectedGgufModelPath();
-            if (ggufPath is not null)
-            {
-                await LoadSelectedGgufModelAsync(ggufPath);
-                return;
-            }
-
             string? modelPath = ResolveSelectedOpenVinoModelPath();
 
             if (modelPath is null)
             {
-                AppendOutput("Convert: select a GGUF model and choose .xml/.bin or .blob.");
+                AppendOutput("Convert: select an OpenVINO .xml/.bin model.");
                 return;
             }
 
@@ -9866,6 +11075,11 @@ namespace WorkStationC_
             ModelFileListItem? selectedItem = GetSelectedModelFileItem();
             ConvertModelSelectionEntry? convertEntry = GetSelectedConvertModelEntry();
 
+            if (convertEntry is { IsOpenVinoIr: true } && File.Exists(convertEntry.SourcePath))
+            {
+                return Path.GetFullPath(convertEntry.SourcePath);
+            }
+
             if (selectedItem is { IsFolder: false } && IsOpenVinoReadableModelFile(selectedItem.Path))
             {
                 string? selectedPath = ResolveListedModelFilePath(selectedItem.Path, repoId, revision, convertEntry);
@@ -9937,17 +11151,12 @@ namespace WorkStationC_
             return null;
         }
 
-        private string? ResolveSelectedGgufModelPath()
-        {
-            ConvertModelSelectionEntry? convertEntry = GetSelectedConvertModelEntry();
-            return convertEntry is not null && File.Exists(convertEntry.GgufPath)
-                ? Path.GetFullPath(convertEntry.GgufPath)
-                : null;
-        }
-
         private string? ResolveSelectedAnyConvertFilePath()
         {
-            return ResolveSelectedGgufModelPath();
+            ConvertModelSelectionEntry? convertEntry = GetSelectedConvertModelEntry();
+            return convertEntry is not null && File.Exists(convertEntry.SourcePath)
+                ? Path.GetFullPath(convertEntry.SourcePath)
+                : null;
         }
 
         private static string GetIrOutputMainFolder(string sourceModelFolder, string sourcePath)
@@ -9979,74 +11188,6 @@ namespace WorkStationC_
             }
 
             return Path.Combine(modelFolder, "main");
-        }
-
-        private static IReadOnlyList<string> FindGgufIrFiles(string sourceDirectory, string ggufPath, DateTime markerUtc)
-        {
-            HashSet<string> files = new(StringComparer.OrdinalIgnoreCase);
-
-            void AddIfExists(string path)
-            {
-                if (File.Exists(path))
-                {
-                    files.Add(Path.GetFullPath(path));
-                }
-            }
-
-            void AddPair(string xmlPath)
-            {
-                AddIfExists(xmlPath);
-                AddIfExists(Path.ChangeExtension(xmlPath, ".bin"));
-            }
-
-            AddPair(Path.Combine(sourceDirectory, "openvino_model.xml"));
-            AddPair(Path.Combine(sourceDirectory, $"{Path.GetFileNameWithoutExtension(ggufPath)}.xml"));
-
-            foreach (string xmlPath in Directory.EnumerateFiles(sourceDirectory, "openvino_*.xml", SearchOption.TopDirectoryOnly))
-            {
-                AddPair(xmlPath);
-            }
-
-            foreach (string xmlPath in Directory.EnumerateFiles(sourceDirectory, "*.xml", SearchOption.TopDirectoryOnly))
-            {
-                string binPath = Path.ChangeExtension(xmlPath, ".bin");
-                bool recentlyWritten = File.GetLastWriteTimeUtc(xmlPath) >= markerUtc
-                    || (File.Exists(binPath) && File.GetLastWriteTimeUtc(binPath) >= markerUtc);
-                if (recentlyWritten)
-                {
-                    AddPair(xmlPath);
-                }
-            }
-
-            return files
-                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-        }
-
-        private static string? FindPrimaryIrXml(IEnumerable<string> files, string sourceDirectory, string ggufPath)
-        {
-            HashSet<string> fileSet = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            string[] preferred =
-            {
-                Path.Combine(sourceDirectory, "openvino_model.xml"),
-                Path.Combine(sourceDirectory, $"{Path.GetFileNameWithoutExtension(ggufPath)}.xml"),
-            };
-
-            foreach (string xmlPath in preferred.Select(Path.GetFullPath))
-            {
-                if (fileSet.Contains(xmlPath) && File.Exists(Path.ChangeExtension(xmlPath, ".bin")))
-                {
-                    return xmlPath;
-                }
-            }
-
-            return fileSet
-                .Where(path => Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase)
-                    && File.Exists(Path.ChangeExtension(path, ".bin")))
-                .OrderBy(path => path.Contains("model", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
         }
 
         private static IReadOnlyList<string> CopyIrFilesToOutputFolder(IEnumerable<string> sourceFiles, string outputFolder)
@@ -10160,11 +11301,11 @@ namespace WorkStationC_
                 return null;
             }
 
-            return File.Exists(entry.GgufPath) ? entry : null;
+            return File.Exists(entry.SourcePath) ? entry : null;
         }
         #endregion
 
-        #region MainForm.Benchmark.cs
+        #region Benchmark
         private async void btnRunGenericBenchmark_Click(object? sender, EventArgs e) => await RunGenericBenchmarkAsync("Generic benchmark");
         private void cboPerformanceHint_SelectedIndexChanged(object? sender, EventArgs e) => AppendOutput($"Benchmark performance hint: {cboPerformanceHint.Text}");
         private async Task RunGenericBenchmarkAsync(string label)
@@ -10394,7 +11535,7 @@ namespace WorkStationC_
         }
         #endregion
 
-        #region MainForm.Visualization.cs
+        #region Visualization
         private void btnBrowseVizCsv_Click(object? sender, EventArgs e) => BrowseForCsvFile(txtVizCsv);
         private void btnRenderChart_Click(object? sender, EventArgs e) => RenderBenchmarkChart();
         private void cboVizMetric_SelectedIndexChanged(object? sender, EventArgs e) => AppendOutput($"Visualization metric: {cboVizMetric.Text}");
@@ -10540,7 +11681,7 @@ namespace WorkStationC_
 
         #endregion
 
-        #region MainForm.Tests.cs
+        #region Tests
         private enum ImageTensorLayout
         {
             Hwc,
@@ -10615,7 +11756,7 @@ namespace WorkStationC_
                         break;
                     case ModelFileKind.Gguf:
                     case ModelFileKind.OpenVinoGenAiDirectory:
-                        AppendOutput("  GenAI runtime: LLMPipeline");
+                        AppendOutput($"  GenAI runtime: {(ShouldUseVisionGenAiPipeline(_selectedRuntimeModelKind, modelPath) ? "VLMPipeline" : "LLMPipeline")}");
                         AppendOutput("  Status: model was already load-and-generation validated on Workstation.");
                         AppendOutput("  Click Send Message to load it again and generate a short response.");
                         break;
@@ -11863,7 +13004,7 @@ namespace WorkStationC_
         }
         #endregion
 
-        #region MainForm.ServerTests.cs
+        #region Server tests
         private static readonly System.Net.Http.HttpClient EndpointTestClient = CreateEndpointTestClient();
         private static System.Net.Http.HttpClient CreateEndpointTestClient()
         {

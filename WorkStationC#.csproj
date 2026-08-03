@@ -53,13 +53,5 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('Runtime\optimum-exporter')">
-    <None Remove="Runtime\optimum-exporter\**\*" />
-    <Content Include="Runtime\optimum-exporter\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-  </ItemGroup>
-
 </Project>
 

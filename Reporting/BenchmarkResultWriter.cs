@@ -9,6 +9,9 @@ namespace WorkStationC_.Reporting
 
     internal static class BenchmarkResultWriter
     {
+        private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+        private static readonly char[] CsvSpecialCharacters = { ',', '"', '\r', '\n' };
+
         public static BenchmarkReportPaths Write(BenchmarkResult result, string resultsDirectory)
         {
             Directory.CreateDirectory(resultsDirectory);
@@ -18,8 +21,7 @@ namespace WorkStationC_.Reporting
             string jsonPath = Path.Combine(resultsDirectory, $"{baseName}.json");
 
             WriteTextAtomically(csvPath, BuildCsv(result));
-            JsonSerializerOptions jsonOptions = new() { WriteIndented = true };
-            WriteTextAtomically(jsonPath, JsonSerializer.Serialize(result, jsonOptions));
+            WriteTextAtomically(jsonPath, JsonSerializer.Serialize(result, JsonOptions));
             return new BenchmarkReportPaths(csvPath, jsonPath);
         }
 
@@ -89,12 +91,12 @@ namespace WorkStationC_.Reporting
 
         private static string EscapeCsv(string value)
         {
-            if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0)
+            if (value.IndexOfAny(CsvSpecialCharacters) < 0)
             {
                 return value;
             }
 
-            return $"\"{value.Replace("\"", "\"\"")}\"";
+            return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
         }
 
         private static string SanitizeFileName(string value)

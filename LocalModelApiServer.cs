@@ -874,6 +874,8 @@ internal sealed class LocalModelApiServer : IDisposable
                 ToolChoice = ReadToolChoice(root),
                 ParallelToolCalls = TryReadBool(root, "parallel_tool_calls") ?? false,
                 ResponseFormat = ReadResponseFormat(root),
+                EnableThinking = TryReadBool(root, "enable_thinking") ?? false,
+                PreserveThinking = TryReadBool(root, "preserve_thinking") ?? false,
             };
             return true;
         }
@@ -1545,6 +1547,8 @@ internal sealed class LocalModelApiTextRequest
     public string ToolChoice { get; init; } = string.Empty;
     public bool ParallelToolCalls { get; init; }
     public string ResponseFormat { get; init; } = string.Empty;
+    public bool EnableThinking { get; init; }
+    public bool PreserveThinking { get; init; }
 }
 
 internal sealed class LocalModelApiTextResult

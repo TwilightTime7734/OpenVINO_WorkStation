@@ -76,20 +76,37 @@ namespace WorkStationC_
             btnSearchAllModels = new Button();
             progressDownload = new ProgressBar();
             lblDownloadStatus = new Label();
-            tabLoadModel = new TabPage();
-            loadModelLayout = new Panel();
-            lblOptimumHeading = new Label();
-            lblOptimumSource = new Label();
-            cboOptimumSourceModel = new ComboBox();
-            btnRefreshOptimumModels = new Button();
-            lblOptimumTask = new Label();
-            cboOptimumTask = new ComboBox();
-            lblOptimumWeights = new Label();
-            cboOptimumWeightFormat = new ComboBox();
-            chkOptimumTrustRemoteCode = new CheckBox();
-            chkOptimumCreateBlob = new CheckBox();
-            btnRunOptimumExport = new Button();
-            lblOptimumStatus = new Label();
+            tabOvmsPull = new TabPage();
+            ovmsPullLayout = new Panel();
+            lblOvmsPullHeading = new Label();
+            lblOvmsExecutable = new Label();
+            txtOvmsExecutable = new TextBox();
+            lblOvmsPythonPath = new Label();
+            txtOvmsPythonPath = new TextBox();
+            lblOvmsExportToolsPath = new Label();
+            txtOvmsExportToolsPath = new TextBox();
+            lblOvmsSourceFormat = new Label();
+            cboOvmsSourceFormat = new ComboBox();
+            lblOvmsTask = new Label();
+            cboOvmsTask = new ComboBox();
+            lblOvmsPipelineType = new Label();
+            cboOvmsPipelineType = new ComboBox();
+            lblOvmsWeightFormat = new Label();
+            cboOvmsWeightFormat = new ComboBox();
+            lblOvmsSourceModel = new Label();
+            cboOvmsSourceModel = new ComboBox();
+            lblOvmsGgufFilename = new Label();
+            txtOvmsGgufFilename = new TextBox();
+            lblOvmsModelRepository = new Label();
+            txtOvmsModelRepository = new TextBox();
+            lblOvmsLogPath = new Label();
+            txtOvmsLogPath = new TextBox();
+            chkOvmsOverwrite = new CheckBox();
+            chkOvmsDebug = new CheckBox();
+            btnCheckOvmsVersions = new Button();
+            btnPreviewOvmsPull = new Button();
+            btnRunOvmsPull = new Button();
+            lblOvmsPullStatus = new Label();
             tabConvert = new TabPage();
             convertLayout = new Panel();
             lblOmzBuilderHeading = new Label();
@@ -97,7 +114,6 @@ namespace WorkStationC_
             btnRefreshConvertModels = new Button();
             grpConvertOutputs = new GroupBox();
             chkConvertBlob = new CheckBox();
-            chkConvertIr = new CheckBox();
             btnConvertToIr = new Button();
             pnlIrVisualizer = new Panel();
             lblIrPlaceholder = new Label();
@@ -227,8 +243,8 @@ namespace WorkStationC_
             tabDownloads.SuspendLayout();
             modelsScroll.SuspendLayout();
             modelsLayout.SuspendLayout();
-            tabLoadModel.SuspendLayout();
-            loadModelLayout.SuspendLayout();
+            tabOvmsPull.SuspendLayout();
+            ovmsPullLayout.SuspendLayout();
             tabConvert.SuspendLayout();
             convertLayout.SuspendLayout();
             grpConvertOutputs.SuspendLayout();
@@ -320,7 +336,7 @@ namespace WorkStationC_
             tabMain.Controls.Add(tabWorkstation);
             tabMain.Controls.Add(tabDownloads);
             tabMain.Controls.Add(tabConvert);
-            tabMain.Controls.Add(tabLoadModel);
+            tabMain.Controls.Add(tabOvmsPull);
             tabMain.Controls.Add(tabBenchmark);
             tabMain.Controls.Add(tabVisualization);
             tabMain.Controls.Add(tabTests);
@@ -710,7 +726,7 @@ namespace WorkStationC_
             modelsLayout.Location = new Point(0, 3);
             modelsLayout.Name = "modelsLayout";
             modelsLayout.Padding = new Padding(10);
-            modelsLayout.Size = new Size(1035, 310);
+            modelsLayout.Size = new Size(1035, 340);
             modelsLayout.TabIndex = 0;
             // 
             // lblDownloadUrl
@@ -802,7 +818,7 @@ namespace WorkStationC_
             btnCopyDownloadUrl.Name = "btnCopyDownloadUrl";
             btnCopyDownloadUrl.Size = new Size(130, 34);
             btnCopyDownloadUrl.TabIndex = 20;
-            btnCopyDownloadUrl.Text = "Save Site";
+            btnCopyDownloadUrl.Text = "Save Address";
             btnCopyDownloadUrl.Click += btnSaveFavoriteSite_Click;
             // 
             // btnPresetHuggingFace
@@ -810,7 +826,7 @@ namespace WorkStationC_
             btnPresetHuggingFace.AutoEllipsis = true;
             btnPresetHuggingFace.Location = new Point(20, 120);
             btnPresetHuggingFace.Name = "btnPresetHuggingFace";
-            btnPresetHuggingFace.Size = new Size(235, 34);
+            btnPresetHuggingFace.Size = new Size(315, 34);
             btnPresetHuggingFace.TabIndex = 1;
             btnPresetHuggingFace.Text = "Site 1";
             btnPresetHuggingFace.Click += btnPresetHuggingFace_Click;
@@ -818,9 +834,9 @@ namespace WorkStationC_
             // btnPresetOpenVino
             // 
             btnPresetOpenVino.AutoEllipsis = true;
-            btnPresetOpenVino.Location = new Point(270, 120);
+            btnPresetOpenVino.Location = new Point(355, 120);
             btnPresetOpenVino.Name = "btnPresetOpenVino";
-            btnPresetOpenVino.Size = new Size(235, 34);
+            btnPresetOpenVino.Size = new Size(315, 34);
             btnPresetOpenVino.TabIndex = 2;
             btnPresetOpenVino.Text = "Site 2";
             btnPresetOpenVino.Click += btnPresetOpenVino_Click;
@@ -828,9 +844,9 @@ namespace WorkStationC_
             // btnPresetIntel
             // 
             btnPresetIntel.AutoEllipsis = true;
-            btnPresetIntel.Location = new Point(520, 120);
+            btnPresetIntel.Location = new Point(690, 120);
             btnPresetIntel.Name = "btnPresetIntel";
-            btnPresetIntel.Size = new Size(235, 34);
+            btnPresetIntel.Size = new Size(315, 34);
             btnPresetIntel.TabIndex = 3;
             btnPresetIntel.Text = "Site 3";
             btnPresetIntel.Click += btnPresetIntel_Click;
@@ -838,9 +854,9 @@ namespace WorkStationC_
             // btnPresetUltralytics
             // 
             btnPresetUltralytics.AutoEllipsis = true;
-            btnPresetUltralytics.Location = new Point(770, 120);
+            btnPresetUltralytics.Location = new Point(20, 165);
             btnPresetUltralytics.Name = "btnPresetUltralytics";
-            btnPresetUltralytics.Size = new Size(235, 34);
+            btnPresetUltralytics.Size = new Size(315, 34);
             btnPresetUltralytics.TabIndex = 4;
             btnPresetUltralytics.Text = "Site 4";
             btnPresetUltralytics.Click += btnPresetUltralytics_Click;
@@ -848,9 +864,9 @@ namespace WorkStationC_
             // btnPresetOllama
             // 
             btnPresetOllama.AutoEllipsis = true;
-            btnPresetOllama.Location = new Point(20, 165);
+            btnPresetOllama.Location = new Point(355, 165);
             btnPresetOllama.Name = "btnPresetOllama";
-            btnPresetOllama.Size = new Size(235, 34);
+            btnPresetOllama.Size = new Size(315, 34);
             btnPresetOllama.TabIndex = 5;
             btnPresetOllama.Text = "Site 5";
             btnPresetOllama.Click += btnPresetOllama_Click;
@@ -858,9 +874,9 @@ namespace WorkStationC_
             // btnOfficialFiles
             // 
             btnOfficialFiles.AutoEllipsis = true;
-            btnOfficialFiles.Location = new Point(270, 165);
+            btnOfficialFiles.Location = new Point(690, 165);
             btnOfficialFiles.Name = "btnOfficialFiles";
-            btnOfficialFiles.Size = new Size(235, 34);
+            btnOfficialFiles.Size = new Size(315, 34);
             btnOfficialFiles.TabIndex = 6;
             btnOfficialFiles.Text = "Site 6";
             btnOfficialFiles.Click += btnOfficialFiles_Click;
@@ -868,9 +884,9 @@ namespace WorkStationC_
             // btnRefreshOfficialIndex
             // 
             btnRefreshOfficialIndex.AutoEllipsis = true;
-            btnRefreshOfficialIndex.Location = new Point(520, 165);
+            btnRefreshOfficialIndex.Location = new Point(20, 210);
             btnRefreshOfficialIndex.Name = "btnRefreshOfficialIndex";
-            btnRefreshOfficialIndex.Size = new Size(235, 34);
+            btnRefreshOfficialIndex.Size = new Size(315, 34);
             btnRefreshOfficialIndex.TabIndex = 7;
             btnRefreshOfficialIndex.Text = "Site 7";
             btnRefreshOfficialIndex.Click += btnRefreshOfficialIndex_Click;
@@ -878,9 +894,9 @@ namespace WorkStationC_
             // btnOpenModelWebsite
             // 
             btnOpenModelWebsite.AutoEllipsis = true;
-            btnOpenModelWebsite.Location = new Point(770, 165);
+            btnOpenModelWebsite.Location = new Point(355, 210);
             btnOpenModelWebsite.Name = "btnOpenModelWebsite";
-            btnOpenModelWebsite.Size = new Size(235, 34);
+            btnOpenModelWebsite.Size = new Size(315, 34);
             btnOpenModelWebsite.TabIndex = 9;
             btnOpenModelWebsite.Text = "Site 8";
             btnOpenModelWebsite.Click += btnOpenModelWebsite_Click;
@@ -888,9 +904,9 @@ namespace WorkStationC_
             // btnAddModelWebsite
             // 
             btnAddModelWebsite.AutoEllipsis = true;
-            btnAddModelWebsite.Location = new Point(20, 210);
+            btnAddModelWebsite.Location = new Point(690, 210);
             btnAddModelWebsite.Name = "btnAddModelWebsite";
-            btnAddModelWebsite.Size = new Size(235, 34);
+            btnAddModelWebsite.Size = new Size(315, 34);
             btnAddModelWebsite.TabIndex = 10;
             btnAddModelWebsite.Text = "Site 9";
             btnAddModelWebsite.Click += btnAddModelWebsite_Click;
@@ -898,9 +914,9 @@ namespace WorkStationC_
             // btnDeleteModelWebsite
             // 
             btnDeleteModelWebsite.AutoEllipsis = true;
-            btnDeleteModelWebsite.Location = new Point(270, 210);
+            btnDeleteModelWebsite.Location = new Point(20, 255);
             btnDeleteModelWebsite.Name = "btnDeleteModelWebsite";
-            btnDeleteModelWebsite.Size = new Size(235, 34);
+            btnDeleteModelWebsite.Size = new Size(315, 34);
             btnDeleteModelWebsite.TabIndex = 11;
             btnDeleteModelWebsite.Text = "Site 10";
             btnDeleteModelWebsite.Click += btnDeleteModelWebsite_Click;
@@ -909,9 +925,9 @@ namespace WorkStationC_
             // 
             btnSearchRepos.Anchor = AnchorStyles.Left;
             btnSearchRepos.AutoEllipsis = true;
-            btnSearchRepos.Location = new Point(520, 210);
+            btnSearchRepos.Location = new Point(355, 255);
             btnSearchRepos.Name = "btnSearchRepos";
-            btnSearchRepos.Size = new Size(235, 34);
+            btnSearchRepos.Size = new Size(315, 34);
             btnSearchRepos.TabIndex = 14;
             btnSearchRepos.Text = "Site 11";
             btnSearchRepos.Click += btnSearchRepos_Click;
@@ -920,16 +936,16 @@ namespace WorkStationC_
             // 
             btnSearchAllModels.Anchor = AnchorStyles.Left;
             btnSearchAllModels.AutoEllipsis = true;
-            btnSearchAllModels.Location = new Point(770, 210);
+            btnSearchAllModels.Location = new Point(690, 255);
             btnSearchAllModels.Name = "btnSearchAllModels";
-            btnSearchAllModels.Size = new Size(235, 34);
+            btnSearchAllModels.Size = new Size(315, 34);
             btnSearchAllModels.TabIndex = 35;
             btnSearchAllModels.Text = "Site 12";
             btnSearchAllModels.Click += btnSearchAllModels_Click;
             // 
             // progressDownload
             // 
-            progressDownload.Location = new Point(20, 260);
+            progressDownload.Location = new Point(20, 302);
             progressDownload.Margin = new Padding(0, 7, 10, 0);
             progressDownload.Name = "progressDownload";
             progressDownload.Size = new Size(420, 18);
@@ -938,156 +954,319 @@ namespace WorkStationC_
             // lblDownloadStatus
             // 
             lblDownloadStatus.AutoEllipsis = true;
-            lblDownloadStatus.Location = new Point(455, 253);
+            lblDownloadStatus.Location = new Point(455, 295);
             lblDownloadStatus.Name = "lblDownloadStatus";
             lblDownloadStatus.Size = new Size(560, 28);
             lblDownloadStatus.TabIndex = 31;
             lblDownloadStatus.TextAlign = ContentAlignment.MiddleLeft;
             // 
-            // tabLoadModel
-            // 
-            tabLoadModel.Controls.Add(loadModelLayout);
-            tabLoadModel.Location = new Point(4, 32);
-            tabLoadModel.Name = "tabLoadModel";
-            tabLoadModel.Padding = new Padding(12);
-            tabLoadModel.Size = new Size(1063, 322);
-            tabLoadModel.TabIndex = 6;
-            tabLoadModel.Text = "Optimum Intel";
-            // 
-            // loadModelLayout
-            // 
-            loadModelLayout.AutoScroll = true;
-            loadModelLayout.Controls.Add(lblOptimumHeading);
-            loadModelLayout.Controls.Add(lblOptimumSource);
-            loadModelLayout.Controls.Add(cboOptimumSourceModel);
-            loadModelLayout.Controls.Add(btnRefreshOptimumModels);
-            loadModelLayout.Controls.Add(lblOptimumTask);
-            loadModelLayout.Controls.Add(cboOptimumTask);
-            loadModelLayout.Controls.Add(lblOptimumWeights);
-            loadModelLayout.Controls.Add(cboOptimumWeightFormat);
-            loadModelLayout.Controls.Add(chkOptimumTrustRemoteCode);
-            loadModelLayout.Controls.Add(chkOptimumCreateBlob);
-            loadModelLayout.Controls.Add(btnRunOptimumExport);
-            loadModelLayout.Controls.Add(lblOptimumStatus);
-            loadModelLayout.Dock = DockStyle.Fill;
-            loadModelLayout.Location = new Point(12, 12);
-            loadModelLayout.Name = "loadModelLayout";
-            loadModelLayout.Padding = new Padding(10);
-            loadModelLayout.Size = new Size(1039, 298);
-            loadModelLayout.TabIndex = 0;
-            // 
-            // lblOptimumHeading
-            // 
-            lblOptimumHeading.AutoSize = true;
-            lblOptimumHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            lblOptimumHeading.Location = new Point(20, 25);
-            lblOptimumHeading.Name = "lblOptimumHeading";
-            lblOptimumHeading.Size = new Size(142, 19);
-            lblOptimumHeading.TabIndex = 0;
-            lblOptimumHeading.Text = "Optimum Intel export";
-            // 
-            // lblOptimumSource
-            // 
-            lblOptimumSource.Location = new Point(20, 72);
-            lblOptimumSource.Name = "lblOptimumSource";
-            lblOptimumSource.Size = new Size(105, 25);
-            lblOptimumSource.TabIndex = 1;
-            lblOptimumSource.Text = "Source model";
-            // 
-            // cboOptimumSourceModel
-            // 
-            cboOptimumSourceModel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            cboOptimumSourceModel.Location = new Point(135, 70);
-            cboOptimumSourceModel.Name = "cboOptimumSourceModel";
-            cboOptimumSourceModel.Size = new Size(693, 25);
-            cboOptimumSourceModel.TabIndex = 2;
-            cboOptimumSourceModel.SelectedIndexChanged += cboOptimumSourceModel_SelectedIndexChanged;
-            // 
-            // btnRefreshOptimumModels
-            // 
-            btnRefreshOptimumModels.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRefreshOptimumModels.Location = new Point(838, 67);
-            btnRefreshOptimumModels.Name = "btnRefreshOptimumModels";
-            btnRefreshOptimumModels.Size = new Size(145, 34);
-            btnRefreshOptimumModels.TabIndex = 3;
-            btnRefreshOptimumModels.Text = "Refresh Models";
-            btnRefreshOptimumModels.Click += btnRefreshOptimumModels_Click;
-            // 
-            // lblOptimumTask
-            // 
-            lblOptimumTask.Location = new Point(20, 118);
-            lblOptimumTask.Name = "lblOptimumTask";
-            lblOptimumTask.Size = new Size(105, 25);
-            lblOptimumTask.TabIndex = 4;
-            lblOptimumTask.Text = "Task";
-            // 
-            // cboOptimumTask
-            // 
-            cboOptimumTask.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboOptimumTask.Items.AddRange(new object[] { "Text generation with memory", "Auto", "Text generation", "Text to text", "Image classification", "Image to text" });
-            cboOptimumTask.Location = new Point(135, 115);
-            cboOptimumTask.Name = "cboOptimumTask";
-            cboOptimumTask.Size = new Size(275, 25);
-            cboOptimumTask.TabIndex = 5;
-            cboOptimumTask.SelectedIndexChanged += cboOptimumTask_SelectedIndexChanged;
-            // 
-            // lblOptimumWeights
-            // 
-            lblOptimumWeights.Location = new Point(430, 118);
-            lblOptimumWeights.Name = "lblOptimumWeights";
-            lblOptimumWeights.Size = new Size(95, 25);
-            lblOptimumWeights.TabIndex = 6;
-            lblOptimumWeights.Text = "Weights";
-            // 
-            // cboOptimumWeightFormat
-            // 
-            cboOptimumWeightFormat.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboOptimumWeightFormat.Items.AddRange(new object[] { "Auto", "INT8", "INT4", "FP16", "FP32" });
-            cboOptimumWeightFormat.Location = new Point(530, 115);
-            cboOptimumWeightFormat.Name = "cboOptimumWeightFormat";
-            cboOptimumWeightFormat.Size = new Size(160, 25);
-            cboOptimumWeightFormat.TabIndex = 7;
-            cboOptimumWeightFormat.SelectedIndexChanged += cboOptimumWeightFormat_SelectedIndexChanged;
-            // 
-            // chkOptimumTrustRemoteCode
-            // 
-            chkOptimumTrustRemoteCode.Location = new Point(135, 160);
-            chkOptimumTrustRemoteCode.Name = "chkOptimumTrustRemoteCode";
-            chkOptimumTrustRemoteCode.Size = new Size(190, 25);
-            chkOptimumTrustRemoteCode.TabIndex = 8;
-            chkOptimumTrustRemoteCode.Text = "Allow model code";
-            chkOptimumTrustRemoteCode.CheckedChanged += chkOptimumTrustRemoteCode_CheckedChanged;
-            // 
-            // chkOptimumCreateBlob
-            // 
-            chkOptimumCreateBlob.Location = new Point(335, 160);
-            chkOptimumCreateBlob.Name = "chkOptimumCreateBlob";
-            chkOptimumCreateBlob.Size = new Size(185, 25);
-            chkOptimumCreateBlob.TabIndex = 9;
-            chkOptimumCreateBlob.Text = "Create .blob after export";
-            chkOptimumCreateBlob.CheckedChanged += chkOptimumCreateBlob_CheckedChanged;
-            // 
-            // btnRunOptimumExport
-            // 
-            btnRunOptimumExport.Location = new Point(20, 205);
-            btnRunOptimumExport.Name = "btnRunOptimumExport";
-            btnRunOptimumExport.Size = new Size(110, 34);
-            btnRunOptimumExport.TabIndex = 10;
-            btnRunOptimumExport.Text = "Export";
-            btnRunOptimumExport.Click += btnRunOptimumExport_Click;
-            // 
-            // lblOptimumStatus
-            // 
-            lblOptimumStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            lblOptimumStatus.AutoEllipsis = true;
-            lblOptimumStatus.ForeColor = SystemColors.GrayText;
-            lblOptimumStatus.Location = new Point(145, 206);
-            lblOptimumStatus.Name = "lblOptimumStatus";
-            lblOptimumStatus.Size = new Size(838, 34);
-            lblOptimumStatus.TabIndex = 11;
-            lblOptimumStatus.Text = "Choose a downloaded Hugging Face source model, then export it to OpenVINO.";
-            lblOptimumStatus.TextAlign = ContentAlignment.MiddleLeft;
-            // 
+            // tabOvmsPull
+            //
+            tabOvmsPull.Controls.Add(ovmsPullLayout);
+            tabOvmsPull.Location = new Point(4, 32);
+            tabOvmsPull.Name = "tabOvmsPull";
+            tabOvmsPull.Padding = new Padding(12);
+            tabOvmsPull.Size = new Size(1063, 322);
+            tabOvmsPull.TabIndex = 8;
+            tabOvmsPull.Text = "OVMS Pull";
+            //
+            // ovmsPullLayout
+            //
+            ovmsPullLayout.AutoScroll = true;
+            ovmsPullLayout.Controls.Add(lblOvmsPullHeading);
+            ovmsPullLayout.Controls.Add(lblOvmsExecutable);
+            ovmsPullLayout.Controls.Add(txtOvmsExecutable);
+            ovmsPullLayout.Controls.Add(lblOvmsPythonPath);
+            ovmsPullLayout.Controls.Add(txtOvmsPythonPath);
+            ovmsPullLayout.Controls.Add(lblOvmsExportToolsPath);
+            ovmsPullLayout.Controls.Add(txtOvmsExportToolsPath);
+            ovmsPullLayout.Controls.Add(lblOvmsSourceFormat);
+            ovmsPullLayout.Controls.Add(cboOvmsSourceFormat);
+            ovmsPullLayout.Controls.Add(lblOvmsTask);
+            ovmsPullLayout.Controls.Add(cboOvmsTask);
+            ovmsPullLayout.Controls.Add(lblOvmsPipelineType);
+            ovmsPullLayout.Controls.Add(cboOvmsPipelineType);
+            ovmsPullLayout.Controls.Add(lblOvmsWeightFormat);
+            ovmsPullLayout.Controls.Add(cboOvmsWeightFormat);
+            ovmsPullLayout.Controls.Add(lblOvmsSourceModel);
+            ovmsPullLayout.Controls.Add(cboOvmsSourceModel);
+            ovmsPullLayout.Controls.Add(lblOvmsGgufFilename);
+            ovmsPullLayout.Controls.Add(txtOvmsGgufFilename);
+            ovmsPullLayout.Controls.Add(lblOvmsModelRepository);
+            ovmsPullLayout.Controls.Add(txtOvmsModelRepository);
+            ovmsPullLayout.Controls.Add(lblOvmsLogPath);
+            ovmsPullLayout.Controls.Add(txtOvmsLogPath);
+            ovmsPullLayout.Controls.Add(chkOvmsOverwrite);
+            ovmsPullLayout.Controls.Add(chkOvmsDebug);
+            ovmsPullLayout.Controls.Add(btnCheckOvmsVersions);
+            ovmsPullLayout.Controls.Add(btnPreviewOvmsPull);
+            ovmsPullLayout.Controls.Add(btnRunOvmsPull);
+            ovmsPullLayout.Controls.Add(lblOvmsPullStatus);
+            ovmsPullLayout.Dock = DockStyle.Fill;
+            ovmsPullLayout.Location = new Point(12, 12);
+            ovmsPullLayout.Name = "ovmsPullLayout";
+            ovmsPullLayout.Padding = new Padding(10);
+            ovmsPullLayout.Size = new Size(1039, 298);
+            ovmsPullLayout.TabIndex = 0;
+            //
+            // lblOvmsPullHeading
+            //
+            lblOvmsPullHeading.AutoSize = true;
+            lblOvmsPullHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            lblOvmsPullHeading.Location = new Point(20, 20);
+            lblOvmsPullHeading.Name = "lblOvmsPullHeading";
+            lblOvmsPullHeading.Size = new Size(148, 19);
+            lblOvmsPullHeading.TabIndex = 0;
+            lblOvmsPullHeading.Text = "OVMS model pull";
+            //
+            // lblOvmsExecutable
+            //
+            lblOvmsExecutable.Location = new Point(20, 62);
+            lblOvmsExecutable.Name = "lblOvmsExecutable";
+            lblOvmsExecutable.Size = new Size(120, 25);
+            lblOvmsExecutable.TabIndex = 1;
+            lblOvmsExecutable.Text = "OVMS program";
+            //
+            // txtOvmsExecutable
+            //
+            txtOvmsExecutable.Location = new Point(150, 60);
+            txtOvmsExecutable.Name = "txtOvmsExecutable";
+            txtOvmsExecutable.Size = new Size(360, 25);
+            txtOvmsExecutable.TabIndex = 2;
+            txtOvmsExecutable.TextChanged += txtOvmsExecutable_TextChanged;
+            //
+            // lblOvmsPythonPath
+            //
+            lblOvmsPythonPath.Location = new Point(530, 62);
+            lblOvmsPythonPath.Name = "lblOvmsPythonPath";
+            lblOvmsPythonPath.Size = new Size(120, 25);
+            lblOvmsPythonPath.TabIndex = 3;
+            lblOvmsPythonPath.Text = "Python DLL folder";
+            //
+            // txtOvmsPythonPath
+            //
+            txtOvmsPythonPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtOvmsPythonPath.Location = new Point(660, 60);
+            txtOvmsPythonPath.Name = "txtOvmsPythonPath";
+            txtOvmsPythonPath.Size = new Size(323, 25);
+            txtOvmsPythonPath.TabIndex = 4;
+            txtOvmsPythonPath.TextChanged += txtOvmsPythonPath_TextChanged;
+            //
+            // lblOvmsExportToolsPath
+            //
+            lblOvmsExportToolsPath.Location = new Point(20, 97);
+            lblOvmsExportToolsPath.Name = "lblOvmsExportToolsPath";
+            lblOvmsExportToolsPath.Size = new Size(120, 25);
+            lblOvmsExportToolsPath.TabIndex = 5;
+            lblOvmsExportToolsPath.Text = "Export tools folder";
+            //
+            // txtOvmsExportToolsPath
+            //
+            txtOvmsExportToolsPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtOvmsExportToolsPath.Location = new Point(150, 95);
+            txtOvmsExportToolsPath.Name = "txtOvmsExportToolsPath";
+            txtOvmsExportToolsPath.Size = new Size(833, 25);
+            txtOvmsExportToolsPath.TabIndex = 6;
+            txtOvmsExportToolsPath.TextChanged += txtOvmsExportToolsPath_TextChanged;
+            //
+            // lblOvmsSourceFormat
+            //
+            lblOvmsSourceFormat.Location = new Point(20, 137);
+            lblOvmsSourceFormat.Name = "lblOvmsSourceFormat";
+            lblOvmsSourceFormat.Size = new Size(120, 25);
+            lblOvmsSourceFormat.TabIndex = 7;
+            lblOvmsSourceFormat.Text = "Source type";
+            //
+            // cboOvmsSourceFormat
+            //
+            cboOvmsSourceFormat.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboOvmsSourceFormat.Location = new Point(150, 135);
+            cboOvmsSourceFormat.Name = "cboOvmsSourceFormat";
+            cboOvmsSourceFormat.Size = new Size(145, 25);
+            cboOvmsSourceFormat.TabIndex = 8;
+            cboOvmsSourceFormat.SelectedIndexChanged += cboOvmsSourceFormat_SelectedIndexChanged;
+            cboOvmsSourceFormat.TextChanged += cboOvmsSourceFormat_TextChanged;
+            //
+            // lblOvmsTask
+            //
+            lblOvmsTask.Location = new Point(315, 137);
+            lblOvmsTask.Name = "lblOvmsTask";
+            lblOvmsTask.Size = new Size(55, 25);
+            lblOvmsTask.TabIndex = 9;
+            lblOvmsTask.Text = "Task";
+            //
+            // cboOvmsTask
+            //
+            cboOvmsTask.Location = new Point(370, 135);
+            cboOvmsTask.Name = "cboOvmsTask";
+            cboOvmsTask.Size = new Size(185, 25);
+            cboOvmsTask.TabIndex = 10;
+            cboOvmsTask.SelectedIndexChanged += cboOvmsTask_SelectedIndexChanged;
+            cboOvmsTask.TextChanged += cboOvmsTask_TextChanged;
+            //
+            // lblOvmsPipelineType
+            //
+            lblOvmsPipelineType.Location = new Point(575, 137);
+            lblOvmsPipelineType.Name = "lblOvmsPipelineType";
+            lblOvmsPipelineType.Size = new Size(70, 25);
+            lblOvmsPipelineType.TabIndex = 11;
+            lblOvmsPipelineType.Text = "Pipeline";
+            //
+            // cboOvmsPipelineType
+            //
+            cboOvmsPipelineType.Location = new Point(650, 135);
+            cboOvmsPipelineType.Name = "cboOvmsPipelineType";
+            cboOvmsPipelineType.Size = new Size(85, 25);
+            cboOvmsPipelineType.TabIndex = 12;
+            cboOvmsPipelineType.SelectedIndexChanged += cboOvmsPipelineType_SelectedIndexChanged;
+            cboOvmsPipelineType.TextChanged += cboOvmsPipelineType_TextChanged;
+            //
+            // lblOvmsWeightFormat
+            //
+            lblOvmsWeightFormat.Location = new Point(755, 137);
+            lblOvmsWeightFormat.Name = "lblOvmsWeightFormat";
+            lblOvmsWeightFormat.Size = new Size(70, 25);
+            lblOvmsWeightFormat.TabIndex = 13;
+            lblOvmsWeightFormat.Text = "Weights";
+            //
+            // cboOvmsWeightFormat
+            //
+            cboOvmsWeightFormat.Location = new Point(835, 135);
+            cboOvmsWeightFormat.Name = "cboOvmsWeightFormat";
+            cboOvmsWeightFormat.Size = new Size(120, 25);
+            cboOvmsWeightFormat.TabIndex = 14;
+            cboOvmsWeightFormat.SelectedIndexChanged += cboOvmsWeightFormat_SelectedIndexChanged;
+            cboOvmsWeightFormat.TextChanged += cboOvmsWeightFormat_TextChanged;
+            //
+            // lblOvmsSourceModel
+            //
+            lblOvmsSourceModel.Location = new Point(20, 177);
+            lblOvmsSourceModel.Name = "lblOvmsSourceModel";
+            lblOvmsSourceModel.Size = new Size(120, 25);
+            lblOvmsSourceModel.TabIndex = 15;
+            lblOvmsSourceModel.Text = "Source model";
+            //
+            // cboOvmsSourceModel
+            //
+            cboOvmsSourceModel.Location = new Point(150, 175);
+            cboOvmsSourceModel.Name = "cboOvmsSourceModel";
+            cboOvmsSourceModel.Size = new Size(360, 25);
+            cboOvmsSourceModel.TabIndex = 16;
+            cboOvmsSourceModel.SelectedIndexChanged += cboOvmsSourceModel_SelectedIndexChanged;
+            cboOvmsSourceModel.TextChanged += cboOvmsSourceModel_TextChanged;
+            //
+            // lblOvmsModelRepository
+            //
+            lblOvmsModelRepository.Location = new Point(530, 177);
+            lblOvmsModelRepository.Name = "lblOvmsModelRepository";
+            lblOvmsModelRepository.Size = new Size(120, 25);
+            lblOvmsModelRepository.TabIndex = 19;
+            lblOvmsModelRepository.Text = "Model folder";
+            //
+            // txtOvmsModelRepository
+            //
+            txtOvmsModelRepository.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtOvmsModelRepository.Location = new Point(660, 175);
+            txtOvmsModelRepository.Name = "txtOvmsModelRepository";
+            txtOvmsModelRepository.Size = new Size(323, 25);
+            txtOvmsModelRepository.TabIndex = 20;
+            txtOvmsModelRepository.TextChanged += txtOvmsModelRepository_TextChanged;
+            //
+            // lblOvmsGgufFilename
+            //
+            lblOvmsGgufFilename.Location = new Point(20, 217);
+            lblOvmsGgufFilename.Name = "lblOvmsGgufFilename";
+            lblOvmsGgufFilename.Size = new Size(120, 25);
+            lblOvmsGgufFilename.TabIndex = 17;
+            lblOvmsGgufFilename.Text = "GGUF filename";
+            //
+            // txtOvmsGgufFilename
+            //
+            txtOvmsGgufFilename.Location = new Point(150, 215);
+            txtOvmsGgufFilename.Name = "txtOvmsGgufFilename";
+            txtOvmsGgufFilename.PlaceholderText = "Qwen3.6-27B-UD-Q8_K_XL.gguf";
+            txtOvmsGgufFilename.Size = new Size(360, 25);
+            txtOvmsGgufFilename.TabIndex = 18;
+            txtOvmsGgufFilename.TextChanged += txtOvmsGgufFilename_TextChanged;
+            //
+            // lblOvmsLogPath
+            //
+            lblOvmsLogPath.Location = new Point(530, 217);
+            lblOvmsLogPath.Name = "lblOvmsLogPath";
+            lblOvmsLogPath.Size = new Size(120, 25);
+            lblOvmsLogPath.TabIndex = 21;
+            lblOvmsLogPath.Text = "Log file";
+            //
+            // txtOvmsLogPath
+            //
+            txtOvmsLogPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtOvmsLogPath.Location = new Point(660, 215);
+            txtOvmsLogPath.Name = "txtOvmsLogPath";
+            txtOvmsLogPath.Size = new Size(323, 25);
+            txtOvmsLogPath.TabIndex = 22;
+            txtOvmsLogPath.TextChanged += txtOvmsLogPath_TextChanged;
+            //
+            // chkOvmsOverwrite
+            //
+            chkOvmsOverwrite.Checked = true;
+            chkOvmsOverwrite.CheckState = CheckState.Checked;
+            chkOvmsOverwrite.Location = new Point(20, 255);
+            chkOvmsOverwrite.Name = "chkOvmsOverwrite";
+            chkOvmsOverwrite.Size = new Size(165, 25);
+            chkOvmsOverwrite.TabIndex = 23;
+            chkOvmsOverwrite.Text = "Replace existing files";
+            chkOvmsOverwrite.CheckedChanged += chkOvmsOverwrite_CheckedChanged;
+            //
+            // chkOvmsDebug
+            //
+            chkOvmsDebug.Checked = true;
+            chkOvmsDebug.CheckState = CheckState.Checked;
+            chkOvmsDebug.Location = new Point(195, 255);
+            chkOvmsDebug.Name = "chkOvmsDebug";
+            chkOvmsDebug.Size = new Size(110, 25);
+            chkOvmsDebug.TabIndex = 24;
+            chkOvmsDebug.Text = "Debug log";
+            chkOvmsDebug.CheckedChanged += chkOvmsDebug_CheckedChanged;
+            //
+            // btnCheckOvmsVersions
+            //
+            btnCheckOvmsVersions.Location = new Point(320, 252);
+            btnCheckOvmsVersions.Name = "btnCheckOvmsVersions";
+            btnCheckOvmsVersions.Size = new Size(120, 34);
+            btnCheckOvmsVersions.TabIndex = 25;
+            btnCheckOvmsVersions.Text = "Check Stack";
+            btnCheckOvmsVersions.Click += btnCheckOvmsVersions_Click;
+            //
+            // btnPreviewOvmsPull
+            //
+            btnPreviewOvmsPull.Location = new Point(450, 252);
+            btnPreviewOvmsPull.Name = "btnPreviewOvmsPull";
+            btnPreviewOvmsPull.Size = new Size(120, 34);
+            btnPreviewOvmsPull.TabIndex = 26;
+            btnPreviewOvmsPull.Text = "Preview";
+            btnPreviewOvmsPull.Click += btnPreviewOvmsPull_Click;
+            //
+            // btnRunOvmsPull
+            //
+            btnRunOvmsPull.Location = new Point(580, 252);
+            btnRunOvmsPull.Name = "btnRunOvmsPull";
+            btnRunOvmsPull.Size = new Size(120, 34);
+            btnRunOvmsPull.TabIndex = 27;
+            btnRunOvmsPull.Text = "Start Pull";
+            btnRunOvmsPull.Click += btnRunOvmsPull_Click;
+            //
+            // lblOvmsPullStatus
+            //
+            lblOvmsPullStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblOvmsPullStatus.AutoEllipsis = true;
+            lblOvmsPullStatus.ForeColor = SystemColors.GrayText;
+            lblOvmsPullStatus.Location = new Point(720, 253);
+            lblOvmsPullStatus.Name = "lblOvmsPullStatus";
+            lblOvmsPullStatus.Size = new Size(263, 34);
+            lblOvmsPullStatus.TabIndex = 28;
+            lblOvmsPullStatus.Text = "Ready to build an OVMS pull command.";
+            lblOvmsPullStatus.TextAlign = ContentAlignment.MiddleLeft;
+            //
             // tabConvert
             // 
             tabConvert.Controls.Add(convertLayout);
@@ -1121,9 +1300,9 @@ namespace WorkStationC_
             lblOmzBuilderHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             lblOmzBuilderHeading.Location = new Point(20, 25);
             lblOmzBuilderHeading.Name = "lblOmzBuilderHeading";
-            lblOmzBuilderHeading.Size = new Size(148, 19);
+            lblOmzBuilderHeading.Size = new Size(155, 19);
             lblOmzBuilderHeading.TabIndex = 22;
-            lblOmzBuilderHeading.Text = "GGUF model convert";
+            lblOmzBuilderHeading.Text = "OpenVINO IR to blob";
             // 
             // cboConvertSourceModel
             // 
@@ -1148,16 +1327,17 @@ namespace WorkStationC_
             // grpConvertOutputs
             // 
             grpConvertOutputs.Controls.Add(chkConvertBlob);
-            grpConvertOutputs.Controls.Add(chkConvertIr);
             grpConvertOutputs.Location = new Point(20, 115);
             grpConvertOutputs.Name = "grpConvertOutputs";
-            grpConvertOutputs.Size = new Size(320, 78);
+            grpConvertOutputs.Size = new Size(160, 78);
             grpConvertOutputs.TabIndex = 34;
             grpConvertOutputs.TabStop = false;
             grpConvertOutputs.Text = "Create";
             // 
             // chkConvertBlob
             // 
+            chkConvertBlob.Checked = true;
+            chkConvertBlob.CheckState = CheckState.Checked;
             chkConvertBlob.Location = new Point(18, 32);
             chkConvertBlob.Name = "chkConvertBlob";
             chkConvertBlob.Size = new Size(85, 25);
@@ -1165,24 +1345,13 @@ namespace WorkStationC_
             chkConvertBlob.Text = ".blob";
             chkConvertBlob.CheckedChanged += chkConvertBlob_CheckedChanged;
             // 
-            // chkConvertIr
-            // 
-            chkConvertIr.Checked = true;
-            chkConvertIr.CheckState = CheckState.Checked;
-            chkConvertIr.Location = new Point(120, 32);
-            chkConvertIr.Name = "chkConvertIr";
-            chkConvertIr.Size = new Size(110, 25);
-            chkConvertIr.TabIndex = 1;
-            chkConvertIr.Text = ".xml/.bin";
-            chkConvertIr.CheckedChanged += chkConvertIr_CheckedChanged;
-            // 
             // btnConvertToIr
             // 
             btnConvertToIr.Location = new Point(20, 215);
             btnConvertToIr.Name = "btnConvertToIr";
             btnConvertToIr.Size = new Size(110, 34);
             btnConvertToIr.TabIndex = 28;
-            btnConvertToIr.Text = "Convert";
+            btnConvertToIr.Text = "Create Blob";
             btnConvertToIr.Click += btnConvertToIr_Click;
             // 
             // pnlIrVisualizer
@@ -1203,9 +1372,9 @@ namespace WorkStationC_
             lblIrPlaceholder.ForeColor = SystemColors.GrayText;
             lblIrPlaceholder.Location = new Point(18, 18);
             lblIrPlaceholder.Name = "lblIrPlaceholder";
-            lblIrPlaceholder.Size = new Size(328, 19);
+            lblIrPlaceholder.Size = new Size(408, 19);
             lblIrPlaceholder.TabIndex = 0;
-            lblIrPlaceholder.Text = "Select a GGUF model, choose outputs, then convert.";
+            lblIrPlaceholder.Text = "Select an OpenVINO .xml/.bin model, then create .blob.";
             // 
             // lblModelsStatus
             // 
@@ -1213,9 +1382,9 @@ namespace WorkStationC_
             lblModelsStatus.ForeColor = SystemColors.GrayText;
             lblModelsStatus.Location = new Point(20, 535);
             lblModelsStatus.Name = "lblModelsStatus";
-            lblModelsStatus.Size = new Size(359, 19);
+            lblModelsStatus.Size = new Size(472, 19);
             lblModelsStatus.TabIndex = 30;
-            lblModelsStatus.Text = "Select a GGUF model from the model root and convert it.";
+            lblModelsStatus.Text = "Select an OpenVINO IR model from the model root and create a device blob.";
             // 
             // tabBenchmark
             // 
@@ -2446,9 +2615,9 @@ namespace WorkStationC_
             modelsScroll.ResumeLayout(false);
             modelsLayout.ResumeLayout(false);
             modelsLayout.PerformLayout();
-            tabLoadModel.ResumeLayout(false);
-            loadModelLayout.ResumeLayout(false);
-            loadModelLayout.PerformLayout();
+            tabOvmsPull.ResumeLayout(false);
+            ovmsPullLayout.ResumeLayout(false);
+            ovmsPullLayout.PerformLayout();
             tabConvert.ResumeLayout(false);
             convertLayout.ResumeLayout(false);
             convertLayout.PerformLayout();
@@ -2519,7 +2688,8 @@ namespace WorkStationC_
         private TableLayoutPanel mainLayout; private Label lblTitle; private Label lblSubtitle; private SplitContainer mainSplit; private TabControl tabMain;
         private TabPage tabWorkstation; private TableLayoutPanel workstationLayout; private Label lblWorkstationHeading; private TableLayoutPanel modelRootLayout; private Label lblModelRoot; private TextBox txtModelRoot; private Button btnBrowseModelRoot; private Button btnCheckWorkstation; private Label lblWorkstationTarget; private ComboBox cboWorkstationTarget; private Label lblWorkstationMultiTarget; private ComboBox cboWorkstationMultiTarget; private Label lblModelCapabilities; private TextBox txtModelCapabilities;
 private Label lblInferModel; private TextBox txtInferModel; private Button btnBrowseInferModel; private Button btnUseSampleModel; private Label lblInferImage; private TextBox txtInferImage; private FlowLayoutPanel imageTestButtons; private Button btnBrowseInferImage; private Button btnRunImageTest; private Label lblInferText; private TextBox txtInferText; private Button btnBrowseInferLabels; private Label lblInferLabels; private TextBox txtInferLabels; private Label lblInferPreset; private ComboBox cboInferPreset;         private TabPage tabBenchmark; private TableLayoutPanel benchmarkLayout; private Label lblBenchIterations; private NumericUpDown numBenchIterations; private Label lblBenchIterationsHelp; private Label lblBenchWarmup; private NumericUpDown numBenchWarmup; private Label lblBenchWarmupHelp; private Label lblBenchRuns; private NumericUpDown numBenchRuns; private Label lblBenchRunsHelp; private Label lblPerformanceHint; private ComboBox cboPerformanceHint; private Button btnRunGenericBenchmark;         private TabPage tabVisualization; private TableLayoutPanel visualizationLayout; private Label lblVizCsv; private TextBox txtVizCsv; private Button btnBrowseVizCsv; private Label lblVizMetric; private ComboBox cboVizMetric; private FlowLayoutPanel vizButtons; private Button btnRenderChart; private Label lblVizStatus; private Panel pnlChart; private Label lblChartPlaceholder;
-        private TabPage tabDownloads; private Panel modelsScroll; private Panel modelsLayout; private TabPage tabConvert; private Panel convertLayout; private TabPage tabLoadModel; private Panel loadModelLayout; private Label lblOptimumHeading; private Label lblOptimumSource; private ComboBox cboOptimumSourceModel; private Button btnRefreshOptimumModels; private Label lblOptimumTask; private ComboBox cboOptimumTask; private Label lblOptimumWeights; private ComboBox cboOptimumWeightFormat; private CheckBox chkOptimumTrustRemoteCode; private CheckBox chkOptimumCreateBlob; private Button btnRunOptimumExport; private Label lblOptimumStatus; private Button btnDeleteDownload; private Label lblModelWebsites; private ComboBox cboModelWebsites; private Button btnOpenModelWebsite; private Button btnAddModelWebsite; private Button btnDeleteModelWebsite; private Label lblHfQuery; private TextBox txtHfQuery; private Button btnSearchRepos; private Button btnSearchAllModels; private Button btnPresetHuggingFace; private Button btnPresetOpenVino; private Button btnPresetIntel; private Button btnPresetUltralytics; private Button btnPresetOllama; private Button btnOfficialFiles; private Button btnRefreshOfficialIndex; private ListView lstHfRepos; private ColumnHeader colModelId; private ColumnHeader colDownloads; private ColumnHeader colLikes; private ColumnHeader colModelSource; private ColumnHeader colTask; private ColumnHeader colLibrary; private ColumnHeader colQuantization; private Button btnLoadFiles; private Button btnClearFileSelection; private Button btnDownloadHelp; private Label lblRepoId; private TextBox txtRepoId; private Label lblRevision; private TextBox txtRevision; private Label lblDownloadUrl; private TextBox txtDownloadUrl; private Button btnCopyDownloadUrl; private ListView lstHfFiles; private ColumnHeader colFilePath; private ColumnHeader colFileType; private ColumnHeader colFileExtension; private ColumnHeader colFileSize; private ColumnHeader colFileNotes; private ProgressBar progressDownload; private Label lblDownloadStatus; private Button btnCancelDownload; private Label modelsSeparator2; private Label lblOmzBuilderHeading; private ComboBox cboConvertSourceModel; private Button btnRefreshConvertModels; private GroupBox grpConvertOutputs; private CheckBox chkConvertBlob; private CheckBox chkConvertIr; private Button btnConvertToIr; private Panel pnlIrVisualizer; private Label lblIrPlaceholder; private Label lblModelsStatus;
+        private TabPage tabDownloads; private Panel modelsScroll; private Panel modelsLayout; private TabPage tabConvert; private Panel convertLayout; private Button btnDeleteDownload; private Label lblModelWebsites; private ComboBox cboModelWebsites; private Button btnOpenModelWebsite; private Button btnAddModelWebsite; private Button btnDeleteModelWebsite; private Label lblHfQuery; private TextBox txtHfQuery; private Button btnSearchRepos; private Button btnSearchAllModels; private Button btnPresetHuggingFace; private Button btnPresetOpenVino; private Button btnPresetIntel; private Button btnPresetUltralytics; private Button btnPresetOllama; private Button btnOfficialFiles; private Button btnRefreshOfficialIndex; private ListView lstHfRepos; private ColumnHeader colModelId; private ColumnHeader colDownloads; private ColumnHeader colLikes; private ColumnHeader colModelSource; private ColumnHeader colTask; private ColumnHeader colLibrary; private ColumnHeader colQuantization; private Button btnLoadFiles; private Button btnClearFileSelection; private Button btnDownloadHelp; private Label lblRepoId; private TextBox txtRepoId; private Label lblRevision; private TextBox txtRevision; private Label lblDownloadUrl; private TextBox txtDownloadUrl; private Button btnCopyDownloadUrl; private ListView lstHfFiles; private ColumnHeader colFilePath; private ColumnHeader colFileType; private ColumnHeader colFileExtension; private ColumnHeader colFileSize; private ColumnHeader colFileNotes; private ProgressBar progressDownload; private Label lblDownloadStatus; private Button btnCancelDownload; private Label modelsSeparator2; private Label lblOmzBuilderHeading; private ComboBox cboConvertSourceModel; private Button btnRefreshConvertModels; private GroupBox grpConvertOutputs; private CheckBox chkConvertBlob; private Button btnConvertToIr; private Panel pnlIrVisualizer; private Label lblIrPlaceholder; private Label lblModelsStatus;
+        private TabPage tabOvmsPull; private Panel ovmsPullLayout; private Label lblOvmsPullHeading; private Label lblOvmsExecutable; private TextBox txtOvmsExecutable; private Label lblOvmsPythonPath; private TextBox txtOvmsPythonPath; private Label lblOvmsExportToolsPath; private TextBox txtOvmsExportToolsPath; private Label lblOvmsSourceFormat; private ComboBox cboOvmsSourceFormat; private Label lblOvmsTask; private ComboBox cboOvmsTask; private Label lblOvmsPipelineType; private ComboBox cboOvmsPipelineType; private Label lblOvmsWeightFormat; private ComboBox cboOvmsWeightFormat; private Label lblOvmsSourceModel; private ComboBox cboOvmsSourceModel; private Label lblOvmsGgufFilename; private TextBox txtOvmsGgufFilename; private Label lblOvmsModelRepository; private TextBox txtOvmsModelRepository; private Label lblOvmsLogPath; private TextBox txtOvmsLogPath; private CheckBox chkOvmsOverwrite; private CheckBox chkOvmsDebug; private Button btnCheckOvmsVersions; private Button btnPreviewOvmsPull; private Button btnRunOvmsPull; private Label lblOvmsPullStatus;
         private TabPage tabTests; private TableLayoutPanel testsLayout; private Label lblTestsHeading; private Label lblTestModelPath; private TextBox txtTestModelPath; private Button btnInspectOpenVinoModel; private Button btnRunOpenVinoModelTest; private Label lblTestsNote; private Label lblImageResult; private PictureBox picImageResult; private TabPage tabServerTests; private TableLayoutPanel serverTestsLayout; private TextBox txtServerEndpointList; private Label lblServerNoInputHeading; private Label lblServerUserInputHeading; private Label lblTestEndpoint; private TextBox txtTestEndpoint; private Button btnTestEndpoint; private Label lblModelsEndpoint; private TextBox txtModelsEndpoint; private Button btnTestModelsEndpoint; private Label lblTestApiKey; private TextBox txtTestApiKey; private Label lblChatEndpoint; private TextBox txtChatEndpoint; private Label lblTextEndpoint; private TextBox txtTextEndpoint; private Button btnTestTextEndpoint; private Label lblImageEndpoint; private TextBox txtImageEndpoint; private Button btnTestImageEndpoint; private Label lblChatModel; private ComboBox cboServerModel; private Label lblChatPrompt; private TextBox txtChatPrompt; private Button btnTestChat; private Button btnShowServerSettings; private Label lblOpenVinoRuntimeHeading; private Label lblLocalServerUrl; private TextBox txtLocalServerUrl; private Button btnStartLocalServer; private Label lblLocalServerStatus; private TextBox txtLocalServerStatus; private Button btnStopLocalServer;
         private TableLayoutPanel outputLayout; private GroupBox grpOutput; private TableLayoutPanel outputContentLayout; private Label lblOutputInfo; private RichTextBox txtOutput; private TableLayoutPanel outputButtons; private Button btnClearOutput; private TableLayoutPanel activityLayout; private Label lblActivityStatus; private ProgressBar progressActivity; private Button btnCancelActivity; private Button btnHelp;
         private Button btnLoadModel;
