@@ -17,6 +17,10 @@ namespace WorkStationC_
         #region Common
         private const ulong MaxChatResponseTokens = 64;
 
+        private const int DefaultLocalApiContextWindowTokens = 32768;
+
+        private const int MaxAdvertisedLocalApiContextWindowTokens = 1048576;
+
         private const int NativeDialogCancelled = unchecked((int)0x800704C7);
 
         private enum ModelFileKind
@@ -647,7 +651,6 @@ namespace WorkStationC_
                 _cachedVlmPipeline = deviceSettings.Properties.Count == 0
                     ? new OpenVinoSharp.GenAI.VLMPipeline(modelPath, deviceSettings.PipelineDevice)
                     : new OpenVinoSharp.GenAI.VLMPipeline(modelPath, deviceSettings.PipelineDevice, new Dictionary<string, string>(deviceSettings.Properties));
-                _cachedVlmPipeline.StartChat();
                 _cachedVlmModelPath = modelPath;
                 _cachedVlmDevice = deviceSettings.CacheKey;
             }
@@ -664,47 +667,38 @@ namespace WorkStationC_
 
             stopwatch.Restart();
             System.Text.StringBuilder generatedBuilder = new();
-            _cachedVlmPipeline!.FinishChat();
-            _cachedVlmPipeline.StartChat();
-            using OpenVinoSharp.GenAI.ChatHistory chatHistory = BuildGenAiChatHistory(modelPath, prompt, enableThinking, preserveThinking, out OpenVinoSharp.GenAI.JsonContainer? extraContext);
-            try
-            {
-                using OpenVinoSharp.GenAI.VLMDecodedResults decodedResults = _cachedVlmPipeline.GenerateWithHistory(
-                    chatHistory,
-                    null,
-                    config,
-                    text =>
-                    {
-                        if (cancellationToken.IsCancellationRequested || _longOperationCancelRequested)
-                        {
-                            return OpenVinoSharp.GenAI.StreamingStatus.Cancel;
-                        }
-
-                        if (!string.IsNullOrEmpty(text))
-                        {
-                            generatedBuilder.Append(text);
-                            streamedText?.Report(text);
-                        }
-
-                        return OpenVinoSharp.GenAI.StreamingStatus.Running;
-                    });
-                stopwatch.Stop();
-                cancellationToken.ThrowIfCancellationRequested();
-                string generated = NormalizeGeneratedAnswerText(generatedBuilder.Length > 0
-                    ? generatedBuilder.ToString()
-                    : decodedResults.GetText());
-
-                return new GgufTestResult
+            // The installed OpenVINO GenAI C runtime does not export VLM generate_with_history.
+            using OpenVinoSharp.GenAI.VLMDecodedResults decodedResults = _cachedVlmPipeline!.Generate(
+                prompt,
+                null,
+                config,
+                text =>
                 {
-                    LoadMilliseconds = loadMs,
-                    GenerateMilliseconds = stopwatch.ElapsedMilliseconds,
-                    GeneratedText = generated,
-                };
-            }
-            finally
+                    if (cancellationToken.IsCancellationRequested || _longOperationCancelRequested)
+                    {
+                        return OpenVinoSharp.GenAI.StreamingStatus.Cancel;
+                    }
+
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        generatedBuilder.Append(text);
+                        streamedText?.Report(text);
+                    }
+
+                    return OpenVinoSharp.GenAI.StreamingStatus.Running;
+                });
+            stopwatch.Stop();
+            cancellationToken.ThrowIfCancellationRequested();
+            string generated = NormalizeGeneratedAnswerText(generatedBuilder.Length > 0
+                ? generatedBuilder.ToString()
+                : decodedResults.GetText());
+
+            return new GgufTestResult
             {
-                extraContext?.Dispose();
-            }
+                LoadMilliseconds = loadMs,
+                GenerateMilliseconds = stopwatch.ElapsedMilliseconds,
+                GeneratedText = generated,
+            };
         }
 
         private static OpenVinoSharp.GenAI.ChatHistory BuildGenAiChatHistory(
@@ -3449,6 +3443,7 @@ namespace WorkStationC_
                     names,
                     entry.Name,
                     "Main model folder",
+                    entry.Folder,
                     entry.RuntimePath,
                     entry.Kind,
                     entry.Loaded);
@@ -3465,6 +3460,7 @@ namespace WorkStationC_
                     names,
                     loadedModelName,
                     "Loaded Workstation model",
+                    _selectedModelFolder,
                     _loadedRuntimeModelPath,
                     _loadedRuntimeModelKind,
                     loaded: true);
@@ -3601,6 +3597,7 @@ namespace WorkStationC_
             HashSet<string> names,
             string requestedName,
             string source,
+            string selectedFolder,
             string runtimePath,
             ModelFileKind kind,
             bool loaded)
@@ -3608,6 +3605,11 @@ namespace WorkStationC_
             string name = EnsureUniqueLocalApiModelName(NormalizeLocalApiModelName(requestedName), names);
             DateTimeOffset modifiedAtUtc = GetLocalApiModifiedTime(runtimePath);
             long sizeBytes = EstimateLocalApiModelSize(runtimePath);
+            ModelConfigClassification classification = ClassifyModelRunPath(selectedFolder, runtimePath, kind);
+            bool supportsChat = kind is ModelFileKind.OpenVinoGenAiDirectory or ModelFileKind.Gguf
+                && classification.AcceptsText;
+            bool supportsImageInput = kind == ModelFileKind.OpenVinoGenAiDirectory
+                && classification.AcceptsImage;
 
             models.Add(new LocalModelApiModel
             {
@@ -3618,6 +3620,9 @@ namespace WorkStationC_
                 Format = DetectLocalApiFormat(kind, runtimePath),
                 Family = DetectLocalApiFamily(runtimePath),
                 QuantizationLevel = DetectLocalApiQuantization(runtimePath),
+                ContextWindowTokens = DetectLocalApiContextWindow(selectedFolder, runtimePath, kind),
+                SupportsChat = supportsChat,
+                SupportsImageInput = supportsImageInput,
                 Loaded = loaded,
                 ModifiedAtUtc = modifiedAtUtc,
                 SizeBytes = sizeBytes,
@@ -3768,6 +3773,160 @@ namespace WorkStationC_
             return markers.FirstOrDefault(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
         }
 
+        private static int DetectLocalApiContextWindow(string selectedFolder, string runtimePath, ModelFileKind kind)
+        {
+            foreach (string configPath in EnumerateLocalApiContextConfigFiles(selectedFolder, runtimePath, kind))
+            {
+                int? contextWindow = TryReadContextWindowFromJson(configPath);
+                if (contextWindow is > 0)
+                {
+                    return contextWindow.Value;
+                }
+            }
+
+            return DefaultLocalApiContextWindowTokens;
+        }
+
+        private static IEnumerable<string> EnumerateLocalApiContextConfigFiles(string selectedFolder, string runtimePath, ModelFileKind kind)
+        {
+            string configDirectory = GetModelConfigDirectory(selectedFolder, runtimePath, kind);
+            string[] fileNames =
+            {
+                "config.json",
+                "generation_config.json",
+                "tokenizer_config.json",
+            };
+
+            foreach (string directory in EnumerateDistinctExistingDirectories(configDirectory, selectedFolder, runtimePath))
+            {
+                foreach (string fileName in fileNames)
+                {
+                    string path = Path.Combine(directory, fileName);
+                    if (File.Exists(path))
+                    {
+                        yield return path;
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<string> EnumerateDistinctExistingDirectories(params string[] paths)
+        {
+            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in paths)
+            {
+                string? directory = Directory.Exists(path)
+                    ? path
+                    : File.Exists(path) ? Path.GetDirectoryName(path) : null;
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    continue;
+                }
+
+                string fullPath;
+                try
+                {
+                    fullPath = Path.GetFullPath(directory);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (Directory.Exists(fullPath) && seen.Add(fullPath))
+                {
+                    yield return fullPath;
+                }
+            }
+        }
+
+        private static int? TryReadContextWindowFromJson(string configPath)
+        {
+            try
+            {
+                using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+                return TryReadContextWindowFromJsonElement(document.RootElement);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int? TryReadContextWindowFromJsonElement(System.Text.Json.JsonElement element)
+        {
+            string[] directNames =
+            {
+                "max_model_len",
+                "context_length",
+                "context_window",
+                "model_max_length",
+                "max_position_embeddings",
+                "max_sequence_length",
+                "seq_length",
+                "max_seq_len",
+                "n_positions",
+                "n_ctx",
+                "num_ctx",
+                "sliding_window",
+            };
+
+            foreach (string propertyName in directNames)
+            {
+                int? value = TryReadContextTokenCount(element, propertyName);
+                if (value is > 0)
+                {
+                    return value;
+                }
+            }
+
+            string[] nestedNames =
+            {
+                "text_config",
+                "llm_config",
+                "language_config",
+            };
+
+            foreach (string propertyName in nestedNames)
+            {
+                if (element.TryGetProperty(propertyName, out System.Text.Json.JsonElement nested)
+                    && nested.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    int? value = TryReadContextWindowFromJsonElement(nested);
+                    if (value is > 0)
+                    {
+                        return value;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static int? TryReadContextTokenCount(System.Text.Json.JsonElement element, string propertyName)
+        {
+            if (!element.TryGetProperty(propertyName, out System.Text.Json.JsonElement property))
+            {
+                return null;
+            }
+
+            long? value = property.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.Number when property.TryGetInt64(out long number) => number,
+                System.Text.Json.JsonValueKind.String when long.TryParse(property.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long number) => number,
+                _ => null,
+            };
+
+            if (value is null
+                || value <= 0
+                || value > MaxAdvertisedLocalApiContextWindowTokens)
+            {
+                return null;
+            }
+
+            return (int)value.Value;
+        }
+
         private void LogLocalApiServerMessage(string message)
         {
             AppendOutput(message);
@@ -3845,14 +4004,6 @@ namespace WorkStationC_
                 AppendGenAiDeviceDetails(context.Device);
                 AppendOutput($"  Prompt: {TrimForOutput(request.Prompt, 500)}");
                 AppendOutput($"  Response limit: {request.MaxTokens:N0} tokens");
-                if (request.HasTools)
-                {
-                    AppendOutput("  Tools: accepted from client. The client runs tools; this server only returns model responses.");
-                    if (!string.IsNullOrWhiteSpace(request.ToolChoice))
-                    {
-                        AppendOutput($"  Tool choice: {TrimForOutput(request.ToolChoice, 120)}");
-                    }
-                }
 
                 SetActivityState("Server chat: generating response...", allowCancel: true);
                 int streamedCharacters = 0;
@@ -4843,18 +4994,17 @@ namespace WorkStationC_
             return value?.ToString() ?? string.Empty;
         }
 
-        private static uint GetWmiUInt32(object source, string propertyName)
-        {
-            object? value = GetWmiValue(source, propertyName);
-            return value is null ? 0 : Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture);
-        }
+private static uint GetWmiUInt32(object source, string propertyName) 
+{ 
+    object? value = GetWmiValue(source, propertyName); 
+    return value is null ? 0 : System.Convert.ToUInt32(value!, System.Globalization.CultureInfo.InvariantCulture); 
+} 
 
-        private static ulong GetWmiUInt64(object source, string propertyName)
-        {
-            object? value = GetWmiValue(source, propertyName);
-            return value is null ? 0 : Convert.ToUInt64(value, System.Globalization.CultureInfo.InvariantCulture);
-        }
-
+private static ulong GetWmiUInt64(object source, string propertyName) 
+{ 
+    object? value = GetWmiValue(source, propertyName); 
+    return value is null ? 0 : System.Convert.ToUInt64(value!, System.Globalization.CultureInfo.InvariantCulture); 
+}
         private static object? GetWmiValue(object source, string propertyName)
         {
             try
@@ -7419,7 +7569,7 @@ namespace WorkStationC_
             string expected = digest["sha256:".Length..].ToLowerInvariant();
             using FileStream stream = File.OpenRead(path);
             byte[] hash = System.Security.Cryptography.SHA256.HashData(stream);
-            string actual = Convert.ToHexString(hash).ToLowerInvariant();
+            string actual = System.Convert.ToHexString(hash).ToLowerInvariant();
             return actual.Equals(expected, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -11572,7 +11722,6 @@ namespace WorkStationC_
 
                 cancellationToken.ThrowIfCancellationRequested();
                 _cachedVlmPipeline = new OpenVinoSharp.GenAI.VLMPipeline(modelPath, device);
-                _cachedVlmPipeline.StartChat();
                 _cachedVlmModelPath = modelPath;
                 _cachedVlmDevice = device;
             }
@@ -11996,7 +12145,8 @@ namespace WorkStationC_
         private static OpenVinoSharp.Tensor CreateRgbImageTensorForVisionPipeline(string imagePath, out string description)
         {
             using Bitmap bitmap = LoadRgbBitmapForVisionPipeline(imagePath, out bool resized);
-            using OpenVinoSharp.Shape shape = new(new long[] { bitmap.Height, bitmap.Width, 3 });
+            // OpenVINO GenAI VLM image tensors are batched NHWC: 1 x height x width x 3.
+            using OpenVinoSharp.Shape shape = new(new long[] { 1, bitmap.Height, bitmap.Width, 3 });
             OpenVinoSharp.Tensor tensor = new(shape, OpenVinoSharp.ElementType.U8);
             Span<byte> data = tensor.AsSpan<byte>();
 
@@ -13170,5 +13320,10 @@ namespace WorkStationC_
                 : $"{normalized[..maxLength]}...";
         }
         #endregion
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+        }
     }
 }

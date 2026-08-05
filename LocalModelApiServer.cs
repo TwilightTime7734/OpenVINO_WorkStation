@@ -293,9 +293,21 @@ internal sealed class LocalModelApiServer : IDisposable
             return;
         }
 
+        if (method == "GET" && path == "/api/version")
+        {
+            await WriteJsonAsync(stream, 200, BuildOllamaVersionPayload(), serverCancellation);
+            return;
+        }
+
         if (method == "GET" && path == "/api/tags")
         {
             await WriteGeneratedJsonAsync(stream, BuildTagsPayload, serverCancellation);
+            return;
+        }
+
+        if (method == "POST" && path == "/api/show")
+        {
+            await HandleOllamaShowAsync(stream, requestBody, serverCancellation);
             return;
         }
 
@@ -385,6 +397,36 @@ internal sealed class LocalModelApiServer : IDisposable
         await WriteJsonAsync(stream, 200, BuildWebSearchPayload(response), cancellationToken);
     }
 
+    private async Task HandleOllamaShowAsync(
+        NetworkStream stream,
+        string requestBody,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseOllamaShowRequest(requestBody, out string modelName, out object? errorPayload))
+        {
+            await WriteJsonAsync(stream, 400, errorPayload!, cancellationToken);
+            return;
+        }
+
+        LocalModelApiSnapshot snapshot = _snapshotProvider();
+        LocalModelApiModel? model = snapshot.Models.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, modelName, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+        {
+            await WriteJsonAsync(
+                stream,
+                404,
+                new
+                {
+                    error = $"Model not found: {modelName}",
+                },
+                cancellationToken);
+            return;
+        }
+
+        await WriteJsonAsync(stream, 200, BuildOllamaShowPayload(model), cancellationToken);
+    }
+
     private async Task HandleTextGenerationAsync(
         NetworkStream stream,
         string requestBody,
@@ -431,22 +473,11 @@ internal sealed class LocalModelApiServer : IDisposable
     private static object BuildChatCompletionPayload(LocalModelApiTextRequest request, LocalModelApiTextResult result)
     {
         string model = string.IsNullOrWhiteSpace(result.ModelName) ? request.Model : result.ModelName;
-        string finishReason = "stop";
         Dictionary<string, object?> message = new()
         {
             ["role"] = "assistant",
+            ["content"] = result.Text,
         };
-
-        if (TryBuildToolCalls(result.Text, out IReadOnlyList<object> toolCalls))
-        {
-            message["content"] = null;
-            message["tool_calls"] = toolCalls;
-            finishReason = "tool_calls";
-        }
-        else
-        {
-            message["content"] = result.Text;
-        }
 
         return new Dictionary<string, object?>
         {
@@ -460,7 +491,7 @@ internal sealed class LocalModelApiServer : IDisposable
                 {
                     ["index"] = 0,
                     ["message"] = message,
-                    ["finish_reason"] = finishReason,
+                    ["finish_reason"] = "stop",
                 },
             },
             ["usage"] = new Dictionary<string, object?>
@@ -475,6 +506,30 @@ internal sealed class LocalModelApiServer : IDisposable
                 ["generate_ms"] = result.GenerateMilliseconds,
             },
         };
+    }
+
+    private static bool TryParseOllamaShowRequest(string requestBody, out string modelName, out object? errorPayload)
+    {
+        modelName = string.Empty;
+        errorPayload = null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(string.IsNullOrWhiteSpace(requestBody) ? "{}" : requestBody);
+            JsonElement root = document.RootElement;
+            modelName = TryReadFirstString(root, "model", "name").Trim();
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                errorPayload = new { error = "Missing model name." };
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            errorPayload = new { error = $"Invalid JSON: {ex.Message}" };
+            return false;
+        }
     }
 
     private static object BuildTextCompletionPayload(LocalModelApiTextRequest request, LocalModelApiTextResult result)
@@ -528,16 +583,6 @@ internal sealed class LocalModelApiServer : IDisposable
         long created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         string model = string.IsNullOrWhiteSpace(result.ModelName) ? request.Model : result.ModelName;
         List<object> payloads = new();
-
-        if (TryBuildToolCalls(result.Text, out IReadOnlyList<object> toolCalls))
-        {
-            payloads.Add(BuildChatChunk(id, created, model, new Dictionary<string, object?>
-            {
-                ["role"] = "assistant",
-                ["tool_calls"] = toolCalls,
-            }, "tool_calls"));
-            return payloads;
-        }
 
         payloads.Add(BuildChatChunk(id, created, model, new Dictionary<string, object?>
         {
@@ -647,143 +692,6 @@ internal sealed class LocalModelApiServer : IDisposable
         };
     }
 
-    private static bool TryBuildToolCalls(string generatedText, out IReadOnlyList<object> toolCalls)
-    {
-        toolCalls = Array.Empty<object>();
-        string json = ExtractJsonObjectText(generatedText);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return false;
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(json);
-            JsonElement root = document.RootElement;
-            List<object> calls = new();
-
-            if (root.ValueKind == JsonValueKind.Object
-                && root.TryGetProperty("tool_calls", out JsonElement toolCallArray)
-                && toolCallArray.ValueKind == JsonValueKind.Array)
-            {
-                int index = 0;
-                foreach (JsonElement call in toolCallArray.EnumerateArray())
-                {
-                    if (TryBuildToolCall(call, index, out object? payload)
-                        && payload is not null)
-                    {
-                        calls.Add(payload);
-                        index++;
-                    }
-                }
-            }
-            else if (root.ValueKind == JsonValueKind.Object
-                && TryBuildToolCall(root, 0, out object? payload)
-                && payload is not null)
-            {
-                calls.Add(payload);
-            }
-
-            if (calls.Count == 0)
-            {
-                return false;
-            }
-
-            toolCalls = calls;
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool TryBuildToolCall(JsonElement call, int index, out object? payload)
-    {
-        payload = null;
-        if (call.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        string id = TryReadString(call, "id");
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            id = $"call_{Guid.NewGuid():N}";
-        }
-
-        string name = string.Empty;
-        string arguments = "{}";
-        if (call.TryGetProperty("function", out JsonElement function)
-            && function.ValueKind == JsonValueKind.Object)
-        {
-            name = TryReadString(function, "name");
-            arguments = ReadJsonStringOrRaw(function, "arguments", "{}");
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = TryReadFirstString(call, "name", "tool", "tool_name");
-        }
-
-        if (arguments == "{}")
-        {
-            arguments = ReadJsonStringOrRaw(call, "arguments", "{}");
-        }
-
-        if (arguments == "{}")
-        {
-            arguments = ReadJsonStringOrRaw(call, "input", "{}");
-        }
-
-        if (arguments == "{}")
-        {
-            arguments = ReadJsonStringOrRaw(call, "parameters", "{}");
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
-
-        payload = new Dictionary<string, object?>
-        {
-            ["id"] = id,
-            ["type"] = "function",
-            ["index"] = index,
-            ["function"] = new Dictionary<string, object?>
-            {
-                ["name"] = name,
-                ["arguments"] = string.IsNullOrWhiteSpace(arguments) ? "{}" : arguments,
-            },
-        };
-        return true;
-    }
-
-    private static string ExtractJsonObjectText(string text)
-    {
-        string trimmed = text.Trim();
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            int firstNewLine = trimmed.IndexOf('\n');
-            if (firstNewLine >= 0)
-            {
-                trimmed = trimmed[(firstNewLine + 1)..].Trim();
-            }
-
-            if (trimmed.EndsWith("```", StringComparison.Ordinal))
-            {
-                trimmed = trimmed[..^3].Trim();
-            }
-        }
-
-        int firstBrace = trimmed.IndexOf('{');
-        int lastBrace = trimmed.LastIndexOf('}');
-        return firstBrace >= 0 && lastBrace > firstBrace
-            ? trimmed[firstBrace..(lastBrace + 1)]
-            : string.Empty;
-    }
-
     private static bool TryParseWebSearchRequest(
         string requestBody,
         out WebSearchRequest? request,
@@ -870,9 +778,6 @@ internal sealed class LocalModelApiServer : IDisposable
                     : 64,
                 Temperature = TryReadDouble(root, "temperature") ?? 0.2,
                 Stream = TryReadBool(root, "stream") ?? false,
-                HasTools = HasArrayItems(root, "tools"),
-                ToolChoice = ReadToolChoice(root),
-                ParallelToolCalls = TryReadBool(root, "parallel_tool_calls") ?? false,
                 ResponseFormat = ReadResponseFormat(root),
                 EnableThinking = TryReadBool(root, "enable_thinking") ?? false,
                 PreserveThinking = TryReadBool(root, "preserve_thinking") ?? false,
@@ -908,12 +813,6 @@ internal sealed class LocalModelApiServer : IDisposable
         }
 
         List<string> lines = new();
-        string toolInstructions = BuildToolPromptInstructions(root);
-        if (!string.IsNullOrWhiteSpace(toolInstructions))
-        {
-            lines.Add(toolInstructions);
-        }
-
         foreach (JsonElement message in messages.EnumerateArray())
         {
             if (message.ValueKind != JsonValueKind.Object)
@@ -954,59 +853,6 @@ internal sealed class LocalModelApiServer : IDisposable
 
                 lines.Add(line);
             }
-        }
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    private static string BuildToolPromptInstructions(JsonElement root)
-    {
-        if (!root.TryGetProperty("tools", out JsonElement tools)
-            || tools.ValueKind != JsonValueKind.Array
-            || tools.GetArrayLength() == 0)
-        {
-            return string.Empty;
-        }
-
-        List<string> lines = new()
-        {
-            "The client has tools available. The client runs tools; this server does not run tools.",
-            "If a tool is needed, answer only with JSON in this shape:",
-            "{\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tool_name\",\"arguments\":\"{\\\"arg\\\":\\\"value\\\"}\"}}]}",
-            "After tool results appear as tool messages, use those results to answer normally.",
-            "Available tools:",
-        };
-
-        foreach (JsonElement tool in tools.EnumerateArray())
-        {
-            if (tool.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            JsonElement function = tool;
-            if (tool.TryGetProperty("function", out JsonElement functionProperty)
-                && functionProperty.ValueKind == JsonValueKind.Object)
-            {
-                function = functionProperty;
-            }
-
-            string name = TryReadString(function, "name");
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                continue;
-            }
-
-            string description = TryReadString(function, "description");
-            string parameters = ReadJsonStringOrRaw(function, "parameters", "{}");
-            lines.Add($"- {name}: {description}");
-            lines.Add($"  parameters: {parameters}");
-        }
-
-        string toolChoice = ReadToolChoice(root);
-        if (!string.IsNullOrWhiteSpace(toolChoice))
-        {
-            lines.Add($"Tool choice requested by client: {toolChoice}");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -1121,21 +967,6 @@ internal sealed class LocalModelApiServer : IDisposable
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string ReadToolChoice(JsonElement root)
-    {
-        if (!root.TryGetProperty("tool_choice", out JsonElement toolChoice))
-        {
-            return string.Empty;
-        }
-
-        if (toolChoice.ValueKind == JsonValueKind.String)
-        {
-            return toolChoice.GetString() ?? string.Empty;
-        }
-
-        return toolChoice.GetRawText();
-    }
-
     private static string ReadResponseFormat(JsonElement root)
     {
         if (!root.TryGetProperty("response_format", out JsonElement responseFormat))
@@ -1146,13 +977,6 @@ internal sealed class LocalModelApiServer : IDisposable
         return responseFormat.ValueKind == JsonValueKind.String
             ? responseFormat.GetString() ?? string.Empty
             : responseFormat.GetRawText();
-    }
-
-    private static bool HasArrayItems(JsonElement root, string propertyName)
-    {
-        return root.TryGetProperty(propertyName, out JsonElement property)
-            && property.ValueKind == JsonValueKind.Array
-            && property.GetArrayLength() > 0;
     }
 
     private static string TryReadString(JsonElement element, string propertyName)
@@ -1264,7 +1088,7 @@ internal sealed class LocalModelApiServer : IDisposable
                 : string.Empty,
             loaded_model = snapshot.LoadedModelName,
             model_loaded = snapshot.ModelLoaded,
-            endpoints = new[] { "/health", "/api/tags", "/api/search", "/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/images/generations" },
+            endpoints = new[] { "/health", "/api/version", "/api/tags", "/api/show", "/api/search", "/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/images/generations" },
             note = "Chat and text endpoints can use the loaded text model. Image generation is not wired yet.",
         };
     }
@@ -1323,9 +1147,71 @@ internal sealed class LocalModelApiServer : IDisposable
                     kind = model.Kind,
                     loaded = model.Loaded,
                     path = model.RuntimePath,
+                    context_window = model.ContextWindowTokens,
+                    supports_chat = model.SupportsChat,
+                    supports_image_input = model.SupportsImageInput,
                 },
             }).ToArray(),
         };
+    }
+
+    private static object BuildOllamaVersionPayload()
+    {
+        return new
+        {
+            version = "0.0.0-workstation",
+        };
+    }
+
+    private static object BuildOllamaShowPayload(LocalModelApiModel model)
+    {
+        string contextKey = string.IsNullOrWhiteSpace(model.Family)
+            ? $"{model.Name}.context_length"
+            : $"{model.Family}.context_length";
+        return new
+        {
+            model = model.Name,
+            modified_at = model.ModifiedAtUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            details = new
+            {
+                parent_model = string.Empty,
+                format = model.Format,
+                family = model.Family,
+                families = string.IsNullOrWhiteSpace(model.Family) ? Array.Empty<string>() : new[] { model.Family },
+                parameter_size = string.Empty,
+                quantization_level = model.QuantizationLevel,
+            },
+            model_info = new Dictionary<string, object?>
+            {
+                [contextKey] = model.ContextWindowTokens,
+            },
+            parameters = $"num_ctx {model.ContextWindowTokens.ToString(CultureInfo.InvariantCulture)}",
+            capabilities = BuildOllamaCapabilities(model),
+            workstation = new
+            {
+                source = model.Source,
+                kind = model.Kind,
+                loaded = model.Loaded,
+                path = model.RuntimePath,
+            },
+        };
+    }
+
+    private static string[] BuildOllamaCapabilities(LocalModelApiModel model)
+    {
+        List<string> capabilities = new();
+        if (model.SupportsChat)
+        {
+            capabilities.Add("completion");
+            capabilities.Add("tools");
+        }
+
+        if (model.SupportsImageInput)
+        {
+            capabilities.Add("vision");
+        }
+
+        return capabilities.ToArray();
     }
 
     private object BuildV1ModelsPayload()
@@ -1340,6 +1226,14 @@ internal sealed class LocalModelApiServer : IDisposable
                 @object = "model",
                 created = model.ModifiedAtUtc.ToUnixTimeSeconds(),
                 owned_by = "OpenVINO Workbench",
+                max_model_len = model.ContextWindowTokens,
+                context_length = model.ContextWindowTokens,
+                context_window = model.ContextWindowTokens,
+                meta = new
+                {
+                    n_ctx = model.ContextWindowTokens,
+                    n_ctx_train = model.ContextWindowTokens,
+                },
                 workstation = new
                 {
                     source = model.Source,
@@ -1351,6 +1245,8 @@ internal sealed class LocalModelApiServer : IDisposable
                     path = model.RuntimePath,
                     size = model.SizeBytes,
                     digest = model.Digest,
+                    supports_chat = model.SupportsChat,
+                    supports_image_input = model.SupportsImageInput,
                 },
             }).ToArray(),
         };
@@ -1503,7 +1399,7 @@ internal sealed class LocalModelApiServer : IDisposable
     {
         string text = $"{source}|{sizeBytes.ToString(CultureInfo.InvariantCulture)}|{modifiedAtUtc.UtcTicks.ToString(CultureInfo.InvariantCulture)}";
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(text));
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return System.Convert.ToHexString(hash).ToLowerInvariant();
     }
 }
 
@@ -1523,6 +1419,9 @@ internal sealed class LocalModelApiModel
     public string Format { get; init; } = string.Empty;
     public string Family { get; init; } = string.Empty;
     public string QuantizationLevel { get; init; } = string.Empty;
+    public int ContextWindowTokens { get; init; }
+    public bool SupportsChat { get; init; }
+    public bool SupportsImageInput { get; init; }
     public bool Loaded { get; init; }
     public DateTimeOffset ModifiedAtUtc { get; init; }
     public long SizeBytes { get; init; }
@@ -1543,9 +1442,6 @@ internal sealed class LocalModelApiTextRequest
     public int MaxTokens { get; init; } = 64;
     public double Temperature { get; init; }
     public bool Stream { get; init; }
-    public bool HasTools { get; init; }
-    public string ToolChoice { get; init; } = string.Empty;
-    public bool ParallelToolCalls { get; init; }
     public string ResponseFormat { get; init; } = string.Empty;
     public bool EnableThinking { get; init; }
     public bool PreserveThinking { get; init; }
