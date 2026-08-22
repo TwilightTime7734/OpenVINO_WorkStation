@@ -45,7 +45,7 @@ public partial class Form1
 
     private void ApplyOpenAiCompatibleEndpointDefaults()
     {
-        string baseUrl = (_localApiServer.IsRunning ? _localApiServer.BaseUrl : LocalModelApiServerBaseUrl).TrimEnd('/');
+        string baseUrl = $"http://localhost:{LocalModelApiServerPort}";
         txtLocalServerUrl.Text = baseUrl;
         txtTestEndpoint.Text = $"{baseUrl}/health";
         txtModelsEndpoint.Text = $"{baseUrl}/v1/models";
@@ -78,15 +78,15 @@ public partial class Form1
         try
         {
             _localApiServer.Start(
-                System.Net.IPAddress.Parse(LocalModelApiServerBindAddress),
+                System.Net.IPAddress.Loopback,
                 LocalModelApiServerPort,
-                GetLocalModelApiServerAdvertisedHost());
+                "localhost");
             UpdateLocalApiServerControls();
             ApplyOpenAiCompatibleEndpointDefaults();
 
             string baseUrl = _localApiServer.BaseUrl;
             AppendOutput("OpenAI-compatible local server started.");
-            AppendOutput($"  Listening: all network adapters on port {LocalModelApiServerPort}");
+            AppendOutput($"  Listening: localhost (127.0.0.1) on port {LocalModelApiServerPort}");
             AppendOutput($"  Health: {baseUrl}/health");
             AppendOutput($"  Models: {baseUrl}/v1/models");
             AppendOutput($"  Chat Completions: {baseUrl}/v1/chat/completions");
@@ -100,14 +100,10 @@ public partial class Form1
         }
         catch (System.Net.Sockets.SocketException ex)
         {
-            AppendOutput($"OpenAI-compatible local server could not start on port {LocalModelApiServerPort}: {ShortError(ex)}");
+            AppendOutput($"OpenAI-compatible local server could not start on localhost port {LocalModelApiServerPort}: {ShortError(ex)}");
             if (ex.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
             {
                 AppendOutput("  Another program is already using that port.");
-            }
-            else if (ex.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable)
-            {
-                AppendOutput("  That address is not assigned to this computer. Use this machine's current IPv4 address or listen on all adapters.");
             }
 
             UpdateLocalApiServerControls();
@@ -219,7 +215,7 @@ public partial class Form1
         AppendOutput("Help - Local Server");
         AppendOutput("------------------------------------------------------------");
         AppendOutput("Local Server exposes the loaded Workstation model through an OpenAI-compatible HTTP API.");
-        AppendOutput("Start or stop the built-in server from the Workstation tab.");
+        AppendOutput("The built-in server listens only on localhost (127.0.0.1) by default.");
         AppendOutput("Health uses /health and model discovery uses /v1/models.");
         AppendOutput("Chat uses /v1/chat/completions and classic text completion uses /v1/completions.");
         AppendOutput("The Image Generations route is reserved but is not implemented yet.");
