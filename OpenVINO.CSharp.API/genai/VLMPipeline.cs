@@ -45,7 +45,8 @@ namespace OpenVinoSharp.GenAI
             if (string.IsNullOrEmpty(device))
                 throw new ArgumentException("Device cannot be null or empty. / 设备不能为空。", nameof(device));
 
-            CreatePipeline(modelsPath, device, properties);
+            IDictionary<string, string>? effectiveProperties = VlmModelCompatibility.Prepare(modelsPath, properties);
+            CreatePipeline(modelsPath, device, effectiveProperties);
         }
 
         internal VLMPipeline(IntPtr ptr)
