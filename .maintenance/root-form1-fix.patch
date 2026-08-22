@@ -1,0 +1,336 @@
+--- a/Form1.cs
++++ b/Form1.cs
+@@ -1335,15 +1335,15 @@
+             {
+                 return new[]
+                 {
+-                    "Server Tests only checks server input and output over HTTP.",
+-                    "Buttons on this tab send requests to the configured server URLs; they do not run the model directly.",
+-                    "Use Workstation to start or stop this app's local server.",
+-                    "API Endpoints shows the local server routes this app exposes.",
+-                    "Server tests without prompt or image checks routes such as Tags and Models.",
+-                    "Server tests with prompt or image sends sample Completions, Text, and Image POST requests.",
+-                    "Test Models fills the Server model dropdown from the server's /v1/models response.",
++                    "Local Server exposes the loaded Workstation model through an OpenAI-compatible HTTP API.",
++                    "The built-in server binds only to localhost (127.0.0.1) on this computer.",
++                    "Use Workstation to start or stop the local server.",
++                    "API Endpoints shows /health plus the OpenAI-compatible /v1 routes.",
++                    "Test Health checks /health and Test Models checks /v1/models.",
++                    "Chat Completions uses /v1/chat/completions and Completions uses /v1/completions.",
++                    "Image Generations is reserved but is not implemented yet.",
+                     "Server model starts with the loaded Workstation model when available; when blank, the app uses the loaded or first known model name.",
+-                    "API Key is an optional bearer token for servers that require authorization.",
++                    "API Key is optional and is intended for testing other OpenAI-compatible servers; this built-in localhost server does not require one.",
+                     "Show URLs prints the current server URLs, model name, prompt, and URL checks without revealing the API key.",
+                     "All results and errors appear in the shared Output panel.",
+                 };
+@@ -3188,12 +3188,12 @@
+         #endregion
+ 
+         #region Workstation
+-        private const string PreferredLocalModelApiServerHost = "192.168.0.11";
+-        private const string LocalModelApiServerBindAddress = "0.0.0.0";
++        private const string LocalModelApiServerHost = "localhost";
++        private const string LocalModelApiServerBindAddress = "127.0.0.1";
+         private const int LocalModelApiServerPort = 11434;
+         private const int DownloadShortcutCount = 12;
+         private const string WorkbenchConfigFileName = "workbench.cfg";
+-        private static string LocalModelApiServerBaseUrl => $"http://{GetLocalModelApiServerAdvertisedHost()}:{LocalModelApiServerPort}";
++        private static string LocalModelApiServerBaseUrl => $"http://{LocalModelApiServerHost}:{LocalModelApiServerPort}";
+ 
+         private sealed class WorkbenchConfig
+         {
+@@ -3239,6 +3239,23 @@
+ 
+         private void InitializeLocalApiServerControls()
+         {
++            tabServerTests.Text = "Local Server";
++            lblOpenVinoRuntimeHeading.Text = "OpenAI-compatible API endpoints";
++            lblServerNoInputHeading.Text = "OpenAI-compatible GET checks";
++            lblServerUserInputHeading.Text = "OpenAI-compatible generation requests";
++            lblTestEndpoint.Text = "Health endpoint:";
++            btnTestEndpoint.Text = "Test Health";
++            lblModelsEndpoint.Text = "Models endpoint:";
++            lblChatEndpoint.Text = "Chat Completions:";
++            lblTextEndpoint.Text = "Completions:";
++            lblImageEndpoint.Text = "Image Generations:";
++            lblLocalServerUrl.Text = "Local server URL:";
++            lblLocalServerStatus.Text = "Local server status:";
++            btnStartLocalServer.Text = "Start Local Server";
++            btnStopLocalServer.Text = "Stop Local Server";
++            lblTestApiKey.Text = "API key (optional):";
++            lblSubtitle.Text = "Tabbed runner for device checks, model tests, conversion, downloads, and an OpenAI-compatible local server.";
++
+             string baseUrl = LocalModelApiServerBaseUrl;
+             txtLocalServerUrl.Text = baseUrl;
+             SetLocalApiEndpointDefaults(baseUrl);
+@@ -3249,7 +3266,7 @@
+         {
+             if (_localApiServer.IsRunning)
+             {
+-                AppendOutput($"Local model server is already running at {_localApiServer.BaseUrl}.");
++                AppendOutput($"OpenAI-compatible local server is already running at {_localApiServer.BaseUrl}.");
+                 UpdateLocalApiServerControls();
+                 return;
+             }
+@@ -3259,39 +3276,33 @@
+                 _localApiServer.Start(
+                     System.Net.IPAddress.Parse(LocalModelApiServerBindAddress),
+                     LocalModelApiServerPort,
+-                    GetLocalModelApiServerAdvertisedHost());
++                    LocalModelApiServerHost);
+                 UpdateLocalApiServerControls();
+                 string baseUrl = _localApiServer.BaseUrl;
+-                AppendOutput("Local model server started.");
+-                AppendOutput($"  Listening: all network adapters on port {LocalModelApiServerPort}");
++                AppendOutput("OpenAI-compatible local server started.");
++                AppendOutput($"  Listening: localhost (127.0.0.1) on port {LocalModelApiServerPort}");
+                 AppendOutput($"  Health: {baseUrl}/health");
+-                AppendOutput($"  Tags: {baseUrl}/api/tags");
+-                AppendOutput($"  Search: {baseUrl}/api/search");
+                 AppendOutput($"  Models: {baseUrl}/v1/models");
+-                AppendOutput($"  Chat: {baseUrl}/v1/chat/completions");
+-                AppendOutput($"  Text: {baseUrl}/v1/completions");
++                AppendOutput($"  Chat Completions: {baseUrl}/v1/chat/completions");
++                AppendOutput($"  Completions: {baseUrl}/v1/completions");
++                AppendOutput($"  Image Generations (not implemented): {baseUrl}/v1/images/generations");
+                 if (_loadedRuntimeModelKind == ModelFileKind.Unknown || string.IsNullOrWhiteSpace(_loadedRuntimeModelPath))
+                 {
+-                    AppendOutput("  No Workstation model is loaded yet. Tags can still list known model folders.");
++                    AppendOutput("  No Workstation model is loaded yet. The Models endpoint can still list known model folders.");
+                 }
+             }
+             catch (System.Net.Sockets.SocketException ex)
+             {
+-                AppendOutput($"Local model server could not start on port {LocalModelApiServerPort}: {ShortError(ex)}");
++                AppendOutput($"OpenAI-compatible local server could not start on localhost port {LocalModelApiServerPort}: {ShortError(ex)}");
+                 if (ex.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+                 {
+                     AppendOutput("  Another program is already using that port.");
+                 }
+-                else if (ex.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable)
+-                {
+-                    AppendOutput("  That address is not assigned to this computer. Use this machine's current IPv4 address or listen on all adapters.");
+-                }
+-
+                 UpdateLocalApiServerControls();
+             }
+             catch (Exception ex)
+             {
+-                AppendOutput($"Local model server could not start: {ShortError(ex)}");
++                AppendOutput($"OpenAI-compatible local server could not start: {ShortError(ex)}");
+                 UpdateLocalApiServerControls();
+             }
+         }
+@@ -3302,7 +3313,7 @@
+             {
+                 if (reportStatus)
+                 {
+-                    AppendOutput("Local model server is already stopped.");
++                    AppendOutput("OpenAI-compatible local server is already stopped.");
+                 }
+ 
+                 UpdateLocalApiServerControls();
+@@ -3313,7 +3324,7 @@
+             UpdateLocalApiServerControls();
+             if (reportStatus)
+             {
+-                AppendOutput("Local model server stopped.");
++                AppendOutput("OpenAI-compatible local server stopped.");
+             }
+         }
+ 
+@@ -3334,7 +3345,7 @@
+         private void SetLocalApiEndpointDefaults(string baseUrl)
+         {
+             string trimmed = baseUrl.TrimEnd('/');
+-            txtTestEndpoint.Text = $"{trimmed}/api/tags";
++            txtTestEndpoint.Text = $"{trimmed}/health";
+             txtModelsEndpoint.Text = $"{trimmed}/v1/models";
+             txtChatEndpoint.Text = $"{trimmed}/v1/chat/completions";
+             txtTextEndpoint.Text = $"{trimmed}/v1/completions";
+@@ -3349,76 +3360,13 @@
+                 Environment.NewLine,
+                 new[]
+                 {
++                    "Protocol: OpenAI-compatible",
+                     $"Health: {trimmed}/health",
+-                    $"Tags: {trimmed}/api/tags",
+-                    $"Search: {trimmed}/api/search",
+                     $"Models: {trimmed}/v1/models",
+-                    $"Completions: {trimmed}/v1/chat/completions",
+-                    $"Text: {trimmed}/v1/completions",
+-                    $"Image: {trimmed}/v1/images/generations",
++                    $"Chat Completions: {trimmed}/v1/chat/completions",
++                    $"Completions: {trimmed}/v1/completions",
++                    $"Image Generations (not implemented): {trimmed}/v1/images/generations",
+                 });
+-        }
+-
+-        private static string GetLocalModelApiServerAdvertisedHost()
+-        {
+-            if (IsLocalIpv4Address(PreferredLocalModelApiServerHost))
+-            {
+-                return PreferredLocalModelApiServerHost;
+-            }
+-
+-            System.Net.IPAddress[] addresses;
+-            try
+-            {
+-                addresses = System.Net.Dns.GetHostAddresses(System.Net.Dns.GetHostName());
+-            }
+-            catch
+-            {
+-                return "127.0.0.1";
+-            }
+-
+-            System.Net.IPAddress? privateAddress = addresses.FirstOrDefault(IsPrivateIpv4Address);
+-            if (privateAddress is not null)
+-            {
+-                return privateAddress.ToString();
+-            }
+-
+-            System.Net.IPAddress? ipv4Address = addresses.FirstOrDefault(address =>
+-                address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+-                && !System.Net.IPAddress.IsLoopback(address));
+-            return ipv4Address?.ToString() ?? "127.0.0.1";
+-        }
+-
+-        private static bool IsLocalIpv4Address(string addressText)
+-        {
+-            if (!System.Net.IPAddress.TryParse(addressText, out System.Net.IPAddress? expected)
+-                || expected.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+-            {
+-                return false;
+-            }
+-
+-            try
+-            {
+-                return System.Net.Dns.GetHostAddresses(System.Net.Dns.GetHostName())
+-                    .Any(address => address.Equals(expected));
+-            }
+-            catch
+-            {
+-                return false;
+-            }
+-        }
+-
+-        private static bool IsPrivateIpv4Address(System.Net.IPAddress address)
+-        {
+-            if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork
+-                || System.Net.IPAddress.IsLoopback(address))
+-            {
+-                return false;
+-            }
+-
+-            byte[] bytes = address.GetAddressBytes();
+-            return bytes[0] == 10
+-                || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+-                || (bytes[0] == 192 && bytes[1] == 168);
+         }
+ 
+         private void btnStartLocalServer_Click(object? sender, EventArgs e)
+@@ -12704,11 +12652,11 @@
+             string endpoint = txtTestEndpoint.Text.Trim();
+             if (!TryCreateAbsoluteUri(endpoint, out Uri? uri) || uri is null)
+             {
+-                AppendOutput($"Server tags test: invalid URL `{endpoint}`.");
+-                return;
+-            }
+-
+-            if (!CanSendServerTest(uri, "Server tags test"))
++                AppendOutput($"Local server health test: invalid URL `{endpoint}`.");
++                return;
++            }
++
++            if (!CanSendServerTest(uri, "Local server health test"))
+             {
+                 return;
+             }
+@@ -12716,7 +12664,7 @@
+             btnTestEndpoint.Enabled = false;
+             try
+             {
+-                AppendOutput($"Server tags test: GET {uri}");
++                AppendOutput($"Local server health test: GET {uri}");
+                 using System.Net.Http.HttpRequestMessage request = new(System.Net.Http.HttpMethod.Get, uri);
+                 AddOptionalBearerToken(request);
+ 
+@@ -12732,7 +12680,7 @@
+             }
+             catch (Exception ex)
+             {
+-                AppendOutput($"Server tags test failed: {ShortError(ex)}");
++                AppendOutput($"Local server health test failed: {ShortError(ex)}");
+             }
+             finally
+             {
+@@ -12978,7 +12926,7 @@
+         {
+             if (IsThisAppsLocalServerUri(uri) && !_localApiServer.IsRunning)
+             {
+-                AppendOutput($"{testName}: local server is stopped. Open Workstation and click Start Server first.");
++                AppendOutput($"{testName}: local server is stopped. Open Workstation and click Start Local Server first.");
+                 return false;
+             }
+ 
+@@ -12987,13 +12935,10 @@
+ 
+         private static bool IsThisAppsLocalServerUri(Uri uri)
+         {
+-            bool isConfiguredHost =
+-                string.Equals(uri.Host, GetLocalModelApiServerAdvertisedHost(), StringComparison.OrdinalIgnoreCase) ||
+-                string.Equals(uri.Host, PreferredLocalModelApiServerHost, StringComparison.OrdinalIgnoreCase) ||
+-                string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+-                string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase);
+-
+-            return isConfiguredHost && uri.Port == LocalModelApiServerPort;
++            bool isLocalHost = string.Equals(uri.Host, LocalModelApiServerHost, StringComparison.OrdinalIgnoreCase)
++                || (System.Net.IPAddress.TryParse(uri.Host, out System.Net.IPAddress? address)
++                    && System.Net.IPAddress.IsLoopback(address));
++            return isLocalHost && uri.Port == LocalModelApiServerPort;
+         }
+ 
+         private async Task<string> PostServerJsonAsync(Uri uri, object payload)
+@@ -13050,7 +12995,7 @@
+ 
+         private void ShowServerSettings()
+         {
+-            string tagsUrl = txtTestEndpoint.Text.Trim();
++            string healthUrl = txtTestEndpoint.Text.Trim();
+             string modelsUrl = txtModelsEndpoint.Text.Trim();
+             string chatUrl = txtChatEndpoint.Text.Trim();
+             string textUrl = txtTextEndpoint.Text.Trim();
+@@ -13059,22 +13004,22 @@
+             string prompt = txtChatPrompt.Text.Trim();
+             string apiKey = txtTestApiKey.Text;
+ 
+-            AppendOutput("Server settings");
+-            AppendOutput($"  Local server address: {FormatSettingValue(txtLocalServerUrl.Text)}");
++            AppendOutput("OpenAI-compatible local server settings");
++            AppendOutput($"  Local server URL: {FormatSettingValue(txtLocalServerUrl.Text)}");
+             AppendOutput($"  Local server status: {FormatSettingValue(txtLocalServerStatus.Text)}");
+-            AppendOutput($"  Server tags URL: {FormatSettingValue(tagsUrl)}");
+-            AppendOutput($"    Check: {DescribeUrlCheck(tagsUrl, expectedPathHint: "/api/tags")}");
+-            AppendOutput($"  Server models URL: {FormatSettingValue(modelsUrl)}");
++            AppendOutput($"  Health URL: {FormatSettingValue(healthUrl)}");
++            AppendOutput($"    Check: {DescribeUrlCheck(healthUrl, expectedPathHint: "/health")}");
++            AppendOutput($"  Models URL: {FormatSettingValue(modelsUrl)}");
+             AppendOutput($"    Check: {DescribeUrlCheck(modelsUrl, expectedPathHint: "/v1/models")}");
+-            AppendOutput($"  Server completions URL: {FormatSettingValue(chatUrl)}");
++            AppendOutput($"  Chat Completions URL: {FormatSettingValue(chatUrl)}");
+             AppendOutput($"    Check: {DescribeUrlCheck(chatUrl, expectedPathHint: "/chat/completions")}");
+-            AppendOutput($"  Server text URL: {FormatSettingValue(textUrl)}");
++            AppendOutput($"  Completions URL: {FormatSettingValue(textUrl)}");
+             AppendOutput($"    Check: {DescribeUrlCheck(textUrl, expectedPathHint: "/completions")}");
+-            AppendOutput($"  Server image URL: {FormatSettingValue(imageUrl)}");
++            AppendOutput($"  Image Generations URL: {FormatSettingValue(imageUrl)}");
+             AppendOutput($"    Check: {DescribeUrlCheck(imageUrl, expectedPathHint: "/images")}");
+             AppendOutput($"  Server model: {FormatSettingValue(serverModel)}");
+-            AppendOutput($"  Server API key: {(string.IsNullOrWhiteSpace(apiKey) ? "not set" : $"set ({apiKey.Length:N0} characters, hidden)")}");
+-            AppendOutput($"  Server prompt: {FormatSettingValue(TrimForOutput(prompt, 500))}");
++            AppendOutput($"  API key: {(string.IsNullOrWhiteSpace(apiKey) ? "not set" : $"set ({apiKey.Length:N0} characters, hidden)")}");
++            AppendOutput($"  Prompt: {FormatSettingValue(TrimForOutput(prompt, 500))}");
+         }
+ 
+         private void UpdateServerModelDropdownFromModelsResponse(string body)
