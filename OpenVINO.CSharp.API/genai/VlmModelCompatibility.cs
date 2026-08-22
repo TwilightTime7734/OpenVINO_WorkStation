@@ -6,7 +6,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -22,11 +21,8 @@ namespace OpenVinoSharp.GenAI
         private const string AttentionBackendKey = "ATTENTION_BACKEND";
         private const string SdpaBackend = "SDPA";
 
-        // This is the exact small Minja-compatible template verified against the
-        // Qwen3.5/Qwen3.8 OpenVINO VLM path. The VLM pipeline normalizes image/video
-        // placeholders into the user content before applying the chat template, so
-        // the compatibility template preserves normal text and vision prompts while
-        // avoiding unsupported Jinja tests used by the exported HF template.
+        // Exact small Minja-compatible template verified against the Qwen3.5/Qwen3.8
+        // OpenVINO VLM path.
         private const string CompatibilityTemplate =
             "<|im_start|>user\n" +
             "{{ messages[0].content }}<|im_end|>\n" +
@@ -45,11 +41,7 @@ namespace OpenVinoSharp.GenAI
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
 
-            // Qwen3.5-family models currently require the regular SDPA VLM backend.
-            // The default Paged-Attention/continuous-batching backend does not support
-            // the chat-template path used by this compatibility mode.
             effective[AttentionBackendKey] = SdpaBackend;
-
             return effective;
         }
 
@@ -91,12 +83,14 @@ namespace OpenVinoSharp.GenAI
 
         private static void InstallCompatibilityTemplate(string modelsPath)
         {
-            // Keep every template source coherent. OpenVINO GenAI can read the normal
-            // chat_template.jinja file, but the tokenizer IR may contain its own
-            // chat_template rt_info value which takes precedence during setup.
             ReplaceTemplateFile(Path.Combine(modelsPath, "chat_template.jinja"));
-            ReplaceEmbeddedTemplate(Path.Combine(modelsPath, "openvino_tokenizer.xml"));
-            ReplaceEmbeddedTemplate(Path.Combine(modelsPath, "openvino_detokenizer.xml"));
+
+            // The tokenizer IR may embed its own chat_template in rt_info. That value
+            // can override chat_template.jinja, so remove only that metadata element.
+            // Do not rewrite the enormous encoded attribute value: stripping the small
+            // rt_info node is safer and lets GenAI use the verified external template.
+            RemoveEmbeddedTemplate(Path.Combine(modelsPath, "openvino_tokenizer.xml"));
+            RemoveEmbeddedTemplate(Path.Combine(modelsPath, "openvino_detokenizer.xml"));
         }
 
         private static void ReplaceTemplateFile(string path)
@@ -108,62 +102,33 @@ namespace OpenVinoSharp.GenAI
             if (string.Equals(current, CompatibilityTemplate, StringComparison.Ordinal))
                 return;
 
-            SaveOriginalTemplate(path, current);
+            SaveOriginalFile(path, current);
             File.WriteAllText(path, CompatibilityTemplate, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
-        private static void ReplaceEmbeddedTemplate(string xmlPath)
+        private static void RemoveEmbeddedTemplate(string xmlPath)
         {
             if (!File.Exists(xmlPath))
                 return;
 
             string xml = File.ReadAllText(xmlPath);
-            const string tag = "<chat_template";
-            const string valueMarker = "value=\"";
+            const string startMarker = "<chat_template";
 
-            int tagStart = xml.IndexOf(tag, StringComparison.Ordinal);
-            if (tagStart < 0)
+            int start = xml.IndexOf(startMarker, StringComparison.Ordinal);
+            if (start < 0)
                 return;
 
-            int markerStart = xml.IndexOf(valueMarker, tagStart, StringComparison.Ordinal);
-            if (markerStart < 0)
+            int selfClosingEnd = xml.IndexOf("/>", start, StringComparison.Ordinal);
+            if (selfClosingEnd < 0)
                 return;
 
-            int valueStart = markerStart + valueMarker.Length;
-            int valueEnd = xml.IndexOf('\"', valueStart);
-            if (valueEnd < 0)
-                return;
-
-            string encodedTemplate = xml.Substring(valueStart, valueEnd - valueStart);
-            string currentTemplate = WebUtility.HtmlDecode(encodedTemplate);
-            if (string.Equals(currentTemplate, CompatibilityTemplate, StringComparison.Ordinal))
-                return;
-
-            SaveOriginalTemplate(xmlPath, currentTemplate);
-
-            string patchedXml = string.Concat(
-                xml.AsSpan(0, valueStart),
-                EncodeXmlAttribute(CompatibilityTemplate),
-                xml.AsSpan(valueEnd));
-
-            File.WriteAllText(xmlPath, patchedXml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            int endExclusive = selfClosingEnd + 2;
+            SaveOriginalFile(xmlPath, xml);
+            string patched = string.Concat(xml.AsSpan(0, start), xml.AsSpan(endExclusive));
+            File.WriteAllText(xmlPath, patched, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
-        private static string EncodeXmlAttribute(string value)
-        {
-            // Preserve newlines explicitly because XML attribute whitespace is normalized.
-            return value
-                .Replace("&", "&amp;", StringComparison.Ordinal)
-                .Replace("\"", "&quot;", StringComparison.Ordinal)
-                .Replace("<", "&lt;", StringComparison.Ordinal)
-                .Replace(">", "&gt;", StringComparison.Ordinal)
-                .Replace("'", "&apos;", StringComparison.Ordinal)
-                .Replace("\r\n", "&#10;", StringComparison.Ordinal)
-                .Replace("\n", "&#10;", StringComparison.Ordinal)
-                .Replace("\r", "&#10;", StringComparison.Ordinal);
-        }
-
-        private static void SaveOriginalTemplate(string sourcePath, string template)
+        private static void SaveOriginalFile(string sourcePath, string content)
         {
             try
             {
@@ -172,15 +137,14 @@ namespace OpenVinoSharp.GenAI
                     ".workstation-compat");
                 Directory.CreateDirectory(directory);
 
-                string fileName = Path.GetFileName(sourcePath) + ".original-chat-template.jinja";
+                string fileName = Path.GetFileName(sourcePath) + ".original";
                 string backupPath = Path.Combine(directory, fileName);
                 if (!File.Exists(backupPath))
-                    File.WriteAllText(backupPath, template, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(backupPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             }
             catch
             {
-                // Backup failure should not prevent model loading. The compatibility
-                // edit itself remains narrowly scoped to chat-template metadata.
+                // Backup failure should not prevent model loading.
             }
         }
     }
