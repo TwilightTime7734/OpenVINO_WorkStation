@@ -1,0 +1,68 @@
+name: Run tab refactor on fix branch
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/run-tab-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/qwen35-vlm-compat
+          fetch-depth: 0
+
+      - name: Normalize Designer field declarations
+        shell: pwsh
+        run: |
+          $path = 'Form1.Designer.cs'
+          $text = Get-Content $path -Raw
+          $text = [regex]::Replace($text, ';[ \t]+private[ \t]+', ";`r`n        private ")
+          [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
+
+      - name: Prepare refactor inputs
+        shell: pwsh
+        run: .maintenance/prepare-tab-refactor.ps1
+
+      - name: Run source refactor
+        shell: pwsh
+        run: dotnet run --project .maintenance/TabRefactor/TabRefactor.csproj
+
+      - name: Build refactored application
+        shell: pwsh
+        run: dotnet build "WorkStationC#.csproj" --configuration Debug
+
+      - name: Verify Designer boundary and structure
+        shell: pwsh
+        run: |
+          if (Select-String -Path Form1.cs,Form1.Designer.cs -Pattern '\btabTests\b' -Quiet) { throw 'tabTests still exists.' }
+          if (Select-String -Path Form1.Designer.cs -Pattern '^\s*private\s+(?!System\.ComponentModel\.IContainer\s+components\b)[\w\.<>]+\s+\w+;\s*$' -Quiet) { throw 'A Designer control field is still private.' }
+          if (Select-String -Path Form1.Designer.cs -Pattern '\b(lblInferImage|txtInferImage|imageTestButtons|btnBrowseInferImage|btnRunImageTest|lblInferText|txtInferText|lblInferLabels|txtInferLabels|btnBrowseInferLabels|lblInferPreset|cboInferPreset|btnInspectOpenVinoModel|lblTestsNote|lblImageResult|picImageResult|btnRunOpenVinoModelTest)\b' -Quiet) { throw 'A removed Tests control still exists.' }
+          if (Test-Path Tests/TestMain.cs) { throw 'Old Tests controller still exists.' }
+          if (Test-Path ServerTests/ServerTestMain.cs) { throw 'Old ServerTests controller still exists.' }
+          if (-not (Test-Path LocalServer/LocalServerMain.cs)) { throw 'LocalServer controller missing.' }
+          if (-not (Test-Path Runtime/OpenVinoRuntimeSupport.cs)) { throw 'Runtime support file missing.' }
+          git diff --check
+
+      - name: Commit refactor to fix branch
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force .maintenance/TabRefactor
+          Remove-Item -Force .maintenance/prepare-tab-refactor.ps1 -ErrorAction SilentlyContinue
+          Remove-Item -Force .maintenance/tab-refactor-analysis.txt -ErrorAction SilentlyContinue
+          Remove-Item -Force .maintenance/refactor-failure.log -ErrorAction SilentlyContinue
+          Remove-Item -Force .github/workflows/analyze-tab-refactor.yml -ErrorAction SilentlyContinue
+          Remove-Item -Force .github/workflows/refactor-tabs.yml -ErrorAction SilentlyContinue
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove Tests tab and refactor Form1 by tab"
+          git pull --rebase origin fix/qwen35-vlm-compat
+          git push origin HEAD:fix/qwen35-vlm-compat
