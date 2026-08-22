@@ -223,20 +223,22 @@ internal sealed class LocalModelApiServer : IDisposable
             return;
         }
 
-        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
-        for (int headerCount = 0; headerCount < 100; headerCount++)
+        var (headers, headersTooLarge) = await ReadHttpHeadersAsync(reader, serverCancellation);
+        if (headersTooLarge)
         {
-            string? line = await reader.ReadLineAsync(serverCancellation);
-            if (line is null || line.Length == 0)
-            {
-                break;
-            }
-
-            int separator = line.IndexOf(':', StringComparison.Ordinal);
-            if (separator > 0)
-            {
-                headers[line[..separator].Trim()] = line[(separator + 1)..].Trim();
-            }
+            await WriteJsonAsync(
+                stream,
+                431,
+                new
+                {
+                    error = new
+                    {
+                        message = "Request headers exceed maximum allowed size (64 KB).",
+                        type = "request_header_fields_too_large",
+                    },
+                },
+                serverCancellation);
+            return;
         }
 
         string method = requestParts[0].ToUpperInvariant();
@@ -278,9 +280,52 @@ internal sealed class LocalModelApiServer : IDisposable
                 return;
             }
 
-            requestBody = await ReadRequestBodyAsync(reader, contentLength);
+            requestBody = await ReadRequestBodyAsync(reader, contentLength, serverCancellation);
         }
 
+        await DispatchRouteAsync(stream, method, path, requestBody, serverCancellation);
+    }
+
+    private const int MaxHeaderSizeBytes = 65536;
+
+    private static async Task<(Dictionary<string, string> Headers, bool ExceededLimit)> ReadHttpHeadersAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
+        int totalHeaderBytes = 0;
+
+        for (int headerCount = 0; headerCount < 100; headerCount++)
+        {
+            string? line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null || line.Length == 0)
+            {
+                break;
+            }
+
+            totalHeaderBytes += Encoding.UTF8.GetByteCount(line);
+            if (totalHeaderBytes > MaxHeaderSizeBytes)
+            {
+                return (headers, true);
+            }
+
+            int separator = line.IndexOf(':', StringComparison.Ordinal);
+            if (separator > 0)
+            {
+                headers[line[..separator].Trim()] = line[(separator + 1)..].Trim();
+            }
+        }
+
+        return (headers, false);
+    }
+
+    private async Task DispatchRouteAsync(
+        NetworkStream stream,
+        string method,
+        string path,
+        string requestBody,
+        CancellationToken serverCancellation)
+    {
         if (method == "OPTIONS")
         {
             await WriteResponseAsync(stream, 204, "No Content", "application/json; charset=utf-8", Array.Empty<byte>(), serverCancellation);
@@ -813,6 +858,8 @@ internal sealed class LocalModelApiServer : IDisposable
         }
 
         List<string> lines = new();
+        bool singleMessage = messages.GetArrayLength() == 1;
+
         foreach (JsonElement message in messages.EnumerateArray())
         {
             if (message.ValueKind != JsonValueKind.Object)
@@ -820,42 +867,48 @@ internal sealed class LocalModelApiServer : IDisposable
                 continue;
             }
 
-            string content = ReadMessageContent(message);
-            string role = TryReadString(message, "role");
-            string toolCalls = ReadMessageToolCalls(message);
-            string toolCallId = TryReadString(message, "tool_call_id");
-
-            if (string.IsNullOrWhiteSpace(content) && string.IsNullOrWhiteSpace(toolCalls))
+            string? formatted = FormatChatMessageLine(message, singleMessage);
+            if (!string.IsNullOrWhiteSpace(formatted))
             {
-                continue;
-            }
-
-            if (string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
-            {
-                string label = string.IsNullOrWhiteSpace(toolCallId)
-                    ? "tool result"
-                    : $"tool result {toolCallId}";
-                lines.Add($"{label}: {content.Trim()}");
-            }
-            else if (string.IsNullOrWhiteSpace(role) || messages.GetArrayLength() == 1)
-            {
-                lines.Add(content.Trim());
-            }
-            else
-            {
-                string line = string.IsNullOrWhiteSpace(content)
-                    ? $"{role.Trim()}:"
-                    : $"{role.Trim()}: {content.Trim()}";
-                if (!string.IsNullOrWhiteSpace(toolCalls))
-                {
-                    line = $"{line}{Environment.NewLine}{toolCalls}";
-                }
-
-                lines.Add(line);
+                lines.Add(formatted);
             }
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string? FormatChatMessageLine(JsonElement message, bool isSingleMessage)
+    {
+        string content = ReadMessageContent(message);
+        string role = TryReadString(message, "role");
+        string toolCalls = ReadMessageToolCalls(message);
+        string toolCallId = TryReadString(message, "tool_call_id");
+
+        if (string.IsNullOrWhiteSpace(content) && string.IsNullOrWhiteSpace(toolCalls))
+        {
+            return null;
+        }
+
+        if (string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
+        {
+            string label = string.IsNullOrWhiteSpace(toolCallId)
+                ? "tool result"
+                : $"tool result {toolCallId}";
+            return $"{label}: {content.Trim()}";
+        }
+
+        if (string.IsNullOrWhiteSpace(role) || isSingleMessage)
+        {
+            return content.Trim();
+        }
+
+        string line = string.IsNullOrWhiteSpace(content)
+            ? $"{role.Trim()}:"
+            : $"{role.Trim()}: {content.Trim()}";
+
+        return string.IsNullOrWhiteSpace(toolCalls)
+            ? line
+            : $"{line}{Environment.NewLine}{toolCalls}";
     }
 
     private static string ReadTextPrompt(JsonElement root)
@@ -1275,7 +1328,7 @@ internal sealed class LocalModelApiServer : IDisposable
         return true;
     }
 
-    private static async Task<string> ReadRequestBodyAsync(StreamReader reader, int contentLength)
+    private static async Task<string> ReadRequestBodyAsync(StreamReader reader, int contentLength, CancellationToken cancellationToken)
     {
         if (contentLength <= 0)
         {
@@ -1286,7 +1339,7 @@ internal sealed class LocalModelApiServer : IDisposable
         int offset = 0;
         while (offset < contentLength)
         {
-            int read = await reader.ReadAsync(buffer, offset, contentLength - offset);
+            int read = await reader.ReadAsync(buffer.AsMemory(offset, contentLength - offset), cancellationToken);
             if (read == 0)
             {
                 break;
@@ -1387,6 +1440,7 @@ internal sealed class LocalModelApiServer : IDisposable
         405 => "Method Not Allowed",
         409 => "Conflict",
         413 => "Payload Too Large",
+        431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         502 => "Bad Gateway",
         503 => "Service Unavailable",

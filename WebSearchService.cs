@@ -108,35 +108,11 @@ internal sealed class WebSearchService
         return Regex.Replace(decoded, @"\s+", " ", RegexOptions.None, TimeSpan.FromMilliseconds(100)).Trim();
     }
 
-    internal static string ReadString(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out JsonElement property))
-        {
-            return string.Empty;
-        }
+    internal static string ReadString(JsonElement element, string propertyName) =>
+        JsonHelper.ReadString(element, propertyName);
 
-        return property.ValueKind switch
-        {
-            JsonValueKind.String => property.GetString() ?? string.Empty,
-            JsonValueKind.Number => property.GetRawText(),
-            _ => string.Empty,
-        };
-    }
-
-    internal static int? ReadInt(JsonElement element, string propertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out JsonElement property))
-        {
-            return null;
-        }
-
-        return property.ValueKind switch
-        {
-            JsonValueKind.Number when property.TryGetInt32(out int value) => value,
-            JsonValueKind.String when int.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) => value,
-            _ => null,
-        };
-    }
+    internal static int? ReadInt(JsonElement element, string propertyName) =>
+        JsonHelper.ReadInt(element, propertyName);
 
     internal static string GetHostName(string url)
     {
@@ -220,6 +196,39 @@ internal sealed class WebSearchService
     private static int Clamp(int value, int minimum, int maximum)
     {
         return Math.Max(minimum, Math.Min(maximum, value));
+    }
+}
+
+internal static class JsonHelper
+{
+    public static string ReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return string.Empty;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.String => property.GetString() ?? string.Empty,
+            JsonValueKind.Number => property.GetRawText(),
+            _ => string.Empty,
+        };
+    }
+
+    public static int? ReadInt(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt32(out int value) => value,
+            JsonValueKind.String when int.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) => value,
+            _ => null,
+        };
     }
 }
 
