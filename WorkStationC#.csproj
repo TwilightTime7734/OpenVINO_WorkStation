@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <ProjectReference Include="OpenVINO.CSharp.API\OpenVINO.CSharp.API.csproj" />
+    <PackageReference Include="OpenVINO.runtime.win" Version="2026.3.0" />
+    <PackageReference Include="JYPPX.OpenVINO.GenAI.runtime.win" Version="2026.3.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -45,13 +47,4 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('Runtime\OpenVINO\win-x64\native')">
-    <Content Include="Runtime\OpenVINO\win-x64\native\*.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <TargetPath>runtimes\win-x64\native\%(Filename)%(Extension)</TargetPath>
-    </Content>
-  </ItemGroup>
-
 </Project>
-
