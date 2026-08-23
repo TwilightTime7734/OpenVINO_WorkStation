@@ -1,15 +1,10 @@
 namespace WorkStationC_.Common
 {
-    public class WorkbenchModel
+    internal sealed class WorkbenchModel
     {
-        public void InitializeModel()
-        {
-            ModelParameters modelParameters = new ModelParameters();
-            ModelTaskTypes modelTaskTypes = new ModelTaskTypes();
-            ModelCapabilities modelCapabilities = new ModelCapabilities();
-            ServerParameters serverParameters = new ServerParameters();
-
-        }
+        public ModelParameters Parameters { get; set; } = new ModelParameters();
+        public ModelCapabilities Capabilities { get; set; } = new ModelCapabilities();
+        public ServerParameters ServerParams { get; set; } = new ServerParameters();
     }
 
 }
