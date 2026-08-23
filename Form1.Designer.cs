@@ -239,7 +239,7 @@ namespace WorkStationC_
             mainSplit.Panel2.Controls.Add(outputLayout);
             mainSplit.Panel2MinSize = 120;
             mainSplit.Size = new Size(1534, 1317);
-            mainSplit.SplitterDistance = 489;
+            mainSplit.SplitterDistance = 457;
             mainSplit.SplitterWidth = 20;
             mainSplit.TabIndex = 2;
             // 
@@ -256,7 +256,7 @@ namespace WorkStationC_
             tabMain.Name = "tabMain";
             tabMain.Padding = new Point(14, 6);
             tabMain.SelectedIndex = 0;
-            tabMain.Size = new Size(1532, 487);
+            tabMain.Size = new Size(1532, 455);
             tabMain.TabIndex = 0;
             tabMain.DrawItem += tabMain_DrawItem;
             tabMain.Selecting += tabMain_Selecting;
@@ -268,7 +268,7 @@ namespace WorkStationC_
             tabWorkstation.Margin = new Padding(4, 5, 4, 5);
             tabWorkstation.Name = "tabWorkstation";
             tabWorkstation.Padding = new Padding(17, 20, 17, 20);
-            tabWorkstation.Size = new Size(1524, 440);
+            tabWorkstation.Size = new Size(1524, 408);
             tabWorkstation.TabIndex = 0;
             tabWorkstation.Text = "Workstation";
             // 
@@ -611,7 +611,7 @@ namespace WorkStationC_
             tabDownloads.Margin = new Padding(4, 5, 4, 5);
             tabDownloads.Name = "tabDownloads";
             tabDownloads.Padding = new Padding(4, 5, 4, 5);
-            tabDownloads.Size = new Size(1524, 456);
+            tabDownloads.Size = new Size(1524, 424);
             tabDownloads.TabIndex = 4;
             tabDownloads.Text = "Downloads";
             // 
@@ -623,7 +623,7 @@ namespace WorkStationC_
             modelsScroll.Location = new Point(4, 5);
             modelsScroll.Margin = new Padding(4, 5, 4, 5);
             modelsScroll.Name = "modelsScroll";
-            modelsScroll.Size = new Size(1516, 446);
+            modelsScroll.Size = new Size(1516, 414);
             modelsScroll.TabIndex = 0;
             // 
             // modelsLayout
@@ -920,7 +920,7 @@ namespace WorkStationC_
             tabConvert.Margin = new Padding(4, 5, 4, 5);
             tabConvert.Name = "tabConvert";
             tabConvert.Padding = new Padding(17, 20, 17, 20);
-            tabConvert.Size = new Size(1524, 456);
+            tabConvert.Size = new Size(1524, 424);
             tabConvert.TabIndex = 5;
             tabConvert.Text = "Convert";
             // 
@@ -939,7 +939,7 @@ namespace WorkStationC_
             convertLayout.Margin = new Padding(4, 5, 4, 5);
             convertLayout.Name = "convertLayout";
             convertLayout.Padding = new Padding(14, 17, 14, 17);
-            convertLayout.Size = new Size(1490, 416);
+            convertLayout.Size = new Size(1490, 384);
             convertLayout.TabIndex = 0;
             // 
             // lblOmzBuilderHeading
@@ -960,14 +960,14 @@ namespace WorkStationC_
             cboConvertSourceModel.Location = new Point(29, 117);
             cboConvertSourceModel.Margin = new Padding(4, 5, 4, 5);
             cboConvertSourceModel.Name = "cboConvertSourceModel";
-            cboConvertSourceModel.Size = new Size(965, 36);
+            cboConvertSourceModel.Size = new Size(913, 36);
             cboConvertSourceModel.TabIndex = 32;
             cboConvertSourceModel.SelectedIndexChanged += cboConvertSourceModel_SelectedIndexChanged;
             // 
             // btnRefreshConvertModels
             // 
             btnRefreshConvertModels.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRefreshConvertModels.Location = new Point(1010, 112);
+            btnRefreshConvertModels.Location = new Point(958, 112);
             btnRefreshConvertModels.Margin = new Padding(4, 5, 4, 5);
             btnRefreshConvertModels.Name = "btnRefreshConvertModels";
             btnRefreshConvertModels.Size = new Size(207, 57);
@@ -1018,7 +1018,7 @@ namespace WorkStationC_
             pnlIrVisualizer.Location = new Point(29, 450);
             pnlIrVisualizer.Margin = new Padding(4, 13, 4, 13);
             pnlIrVisualizer.Name = "pnlIrVisualizer";
-            pnlIrVisualizer.Size = new Size(1188, 415);
+            pnlIrVisualizer.Size = new Size(1136, 415);
             pnlIrVisualizer.TabIndex = 29;
             // 
             // lblIrPlaceholder
@@ -1050,7 +1050,7 @@ namespace WorkStationC_
             tabOvmsPull.Margin = new Padding(4, 5, 4, 5);
             tabOvmsPull.Name = "tabOvmsPull";
             tabOvmsPull.Padding = new Padding(17, 20, 17, 20);
-            tabOvmsPull.Size = new Size(1524, 456);
+            tabOvmsPull.Size = new Size(1524, 424);
             tabOvmsPull.TabIndex = 8;
             tabOvmsPull.Text = "OVMS Pull";
             // 
@@ -1091,7 +1091,7 @@ namespace WorkStationC_
             ovmsPullLayout.Margin = new Padding(4, 5, 4, 5);
             ovmsPullLayout.Name = "ovmsPullLayout";
             ovmsPullLayout.Padding = new Padding(14, 17, 14, 17);
-            ovmsPullLayout.Size = new Size(1490, 416);
+            ovmsPullLayout.Size = new Size(1490, 384);
             ovmsPullLayout.TabIndex = 0;
             // 
             // lblOvmsPullHeading
@@ -1138,7 +1138,7 @@ namespace WorkStationC_
             txtOvmsPythonPath.Location = new Point(943, 100);
             txtOvmsPythonPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsPythonPath.Name = "txtOvmsPythonPath";
-            txtOvmsPythonPath.Size = new Size(362, 34);
+            txtOvmsPythonPath.Size = new Size(310, 34);
             txtOvmsPythonPath.TabIndex = 4;
             txtOvmsPythonPath.TextChanged += txtOvmsPythonPath_TextChanged;
             // 
@@ -1157,7 +1157,7 @@ namespace WorkStationC_
             txtOvmsExportToolsPath.Location = new Point(214, 158);
             txtOvmsExportToolsPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsExportToolsPath.Name = "txtOvmsExportToolsPath";
-            txtOvmsExportToolsPath.Size = new Size(1090, 34);
+            txtOvmsExportToolsPath.Size = new Size(1038, 34);
             txtOvmsExportToolsPath.TabIndex = 6;
             txtOvmsExportToolsPath.TextChanged += txtOvmsExportToolsPath_TextChanged;
             // 
@@ -1291,7 +1291,7 @@ namespace WorkStationC_
             txtOvmsModelRepository.Location = new Point(943, 292);
             txtOvmsModelRepository.Margin = new Padding(4, 5, 4, 5);
             txtOvmsModelRepository.Name = "txtOvmsModelRepository";
-            txtOvmsModelRepository.Size = new Size(362, 34);
+            txtOvmsModelRepository.Size = new Size(310, 34);
             txtOvmsModelRepository.TabIndex = 20;
             txtOvmsModelRepository.TextChanged += txtOvmsModelRepository_TextChanged;
             // 
@@ -1310,7 +1310,7 @@ namespace WorkStationC_
             txtOvmsLogPath.Location = new Point(943, 358);
             txtOvmsLogPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsLogPath.Name = "txtOvmsLogPath";
-            txtOvmsLogPath.Size = new Size(362, 34);
+            txtOvmsLogPath.Size = new Size(310, 34);
             txtOvmsLogPath.TabIndex = 22;
             txtOvmsLogPath.TextChanged += txtOvmsLogPath_TextChanged;
             // 
@@ -1376,7 +1376,7 @@ namespace WorkStationC_
             lblOvmsPullStatus.Location = new Point(1029, 422);
             lblOvmsPullStatus.Margin = new Padding(4, 0, 4, 0);
             lblOvmsPullStatus.Name = "lblOvmsPullStatus";
-            lblOvmsPullStatus.Size = new Size(278, 57);
+            lblOvmsPullStatus.Size = new Size(226, 57);
             lblOvmsPullStatus.TabIndex = 28;
             lblOvmsPullStatus.Text = "Ready to build an OVMS pull command.";
             lblOvmsPullStatus.TextAlign = ContentAlignment.MiddleLeft;
@@ -1394,7 +1394,7 @@ namespace WorkStationC_
             outputLayout.RowCount = 2;
             outputLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 97F));
-            outputLayout.Size = new Size(1532, 806);
+            outputLayout.Size = new Size(1532, 838);
             outputLayout.TabIndex = 0;
             // 
             // grpOutput
@@ -1405,7 +1405,7 @@ namespace WorkStationC_
             grpOutput.Margin = new Padding(4, 5, 4, 5);
             grpOutput.Name = "grpOutput";
             grpOutput.Padding = new Padding(4, 5, 4, 5);
-            grpOutput.Size = new Size(1524, 699);
+            grpOutput.Size = new Size(1524, 731);
             grpOutput.TabIndex = 0;
             grpOutput.TabStop = false;
             grpOutput.Text = "Output";
@@ -1423,7 +1423,7 @@ namespace WorkStationC_
             outputContentLayout.RowCount = 2;
             outputContentLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
             outputContentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            outputContentLayout.Size = new Size(1516, 665);
+            outputContentLayout.Size = new Size(1516, 697);
             outputContentLayout.TabIndex = 0;
             // 
             // lblOutputInfo
@@ -1449,7 +1449,7 @@ namespace WorkStationC_
             txtOutput.Margin = new Padding(4, 5, 4, 5);
             txtOutput.Name = "txtOutput";
             txtOutput.ReadOnly = true;
-            txtOutput.Size = new Size(1508, 615);
+            txtOutput.Size = new Size(1508, 647);
             txtOutput.TabIndex = 1;
             txtOutput.Text = "OpenVINO Workbench layout initialized.\n";
             // 
@@ -1463,7 +1463,7 @@ namespace WorkStationC_
             outputButtons.Controls.Add(activityLayout, 1, 0);
             outputButtons.Controls.Add(btnHelp, 2, 0);
             outputButtons.Dock = DockStyle.Fill;
-            outputButtons.Location = new Point(4, 714);
+            outputButtons.Location = new Point(4, 746);
             outputButtons.Margin = new Padding(4, 5, 4, 5);
             outputButtons.Name = "outputButtons";
             outputButtons.Padding = new Padding(0, 10, 0, 0);

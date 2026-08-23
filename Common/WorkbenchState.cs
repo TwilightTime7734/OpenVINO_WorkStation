@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+namespace WorkStationC_.Common;
 
-namespace WorkStationC_.Common
+internal sealed class WorkbenchState
 {
-    internal class WorkbenchState
-    {
-    }
+    public ServerParameters Server { get; set; } = new ServerParameters();
 }
