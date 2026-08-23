@@ -12,12 +12,18 @@
   <ItemGroup>
     <Compile Remove="OpenVINO.CSharp.API\**\*.cs" />
     <Compile Remove="Extras\**\*.cs" />
+    <Compile Remove="ServerTests\**" />
+    <Compile Remove="Tests\**" />
     <Compile Remove="_buildcheck\**\*.cs" />
     <EmbeddedResource Remove="OpenVINO.CSharp.API\**\*" />
     <EmbeddedResource Remove="Extras\**\*" />
+    <EmbeddedResource Remove="ServerTests\**" />
+    <EmbeddedResource Remove="Tests\**" />
     <EmbeddedResource Remove="_buildcheck\**\*" />
     <None Remove="OpenVINO.CSharp.API\**\*" />
     <None Remove="Extras\**\*" />
+    <None Remove="ServerTests\**" />
+    <None Remove="Tests\**" />
     <None Remove="_buildcheck\**\*" />
   </ItemGroup>
 
