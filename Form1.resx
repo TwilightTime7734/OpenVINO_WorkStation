@@ -117,12 +117,4 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="txtServerEndpointList.Text" xml:space="preserve">
-    <value>Health: http://127.0.0.1:11434/health
-Tags: http://127.0.0.1:11434/api/tags
-Models: http://127.0.0.1:11434/v1/models
-Completions: http://127.0.0.1:11434/v1/chat/completions
-Text: http://127.0.0.1:11434/v1/completions
-Image: http://127.0.0.1:11434/v1/images/generations</value>
-  </data>
 </root>

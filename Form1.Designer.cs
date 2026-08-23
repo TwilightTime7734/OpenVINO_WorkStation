@@ -17,7 +17,6 @@ namespace WorkStationC_
 
         private void InitializeComponent()
         {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             mainLayout = new TableLayoutPanel();
             lblTitle = new Label();
             lblSubtitle = new Label();
@@ -118,56 +117,6 @@ namespace WorkStationC_
             btnPreviewOvmsPull = new Button();
             btnRunOvmsPull = new Button();
             lblOvmsPullStatus = new Label();
-            tabTests = new TabPage();
-            testsLayout = new TableLayoutPanel();
-            lblTestsHeading = new Label();
-            lblTestModelPath = new Label();
-            txtTestModelPath = new TextBox();
-            lblInferImage = new Label();
-            txtInferImage = new TextBox();
-            imageTestButtons = new FlowLayoutPanel();
-            btnBrowseInferImage = new Button();
-            btnRunImageTest = new Button();
-            lblInferText = new Label();
-            txtInferText = new TextBox();
-            lblInferLabels = new Label();
-            txtInferLabels = new TextBox();
-            btnBrowseInferLabels = new Button();
-            lblInferPreset = new Label();
-            cboInferPreset = new ComboBox();
-            btnInspectOpenVinoModel = new Button();
-            lblTestsNote = new Label();
-            lblImageResult = new Label();
-            picImageResult = new PictureBox();
-            btnRunOpenVinoModelTest = new Button();
-            tabServerTests = new TabPage();
-            serverTestsLayout = new TableLayoutPanel();
-            lblOpenVinoRuntimeHeading = new Label();
-            txtServerEndpointList = new TextBox();
-            lblTestApiKey = new Label();
-            txtTestApiKey = new TextBox();
-            lblServerNoInputHeading = new Label();
-            lblTestEndpoint = new Label();
-            txtTestEndpoint = new TextBox();
-            btnTestEndpoint = new Button();
-            lblModelsEndpoint = new Label();
-            txtModelsEndpoint = new TextBox();
-            btnTestModelsEndpoint = new Button();
-            lblServerUserInputHeading = new Label();
-            lblChatModel = new Label();
-            cboServerModel = new ComboBox();
-            lblChatPrompt = new Label();
-            txtChatPrompt = new TextBox();
-            lblChatEndpoint = new Label();
-            txtChatEndpoint = new TextBox();
-            btnTestChat = new Button();
-            lblTextEndpoint = new Label();
-            txtTextEndpoint = new TextBox();
-            btnTestTextEndpoint = new Button();
-            lblImageEndpoint = new Label();
-            txtImageEndpoint = new TextBox();
-            btnTestImageEndpoint = new Button();
-            btnShowServerSettings = new Button();
             outputLayout = new TableLayoutPanel();
             grpOutput = new GroupBox();
             outputContentLayout = new TableLayoutPanel();
@@ -223,12 +172,6 @@ namespace WorkStationC_
             pnlIrVisualizer.SuspendLayout();
             tabOvmsPull.SuspendLayout();
             ovmsPullLayout.SuspendLayout();
-            tabTests.SuspendLayout();
-            testsLayout.SuspendLayout();
-            imageTestButtons.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)picImageResult).BeginInit();
-            tabServerTests.SuspendLayout();
-            serverTestsLayout.SuspendLayout();
             outputLayout.SuspendLayout();
             grpOutput.SuspendLayout();
             outputContentLayout.SuspendLayout();
@@ -296,7 +239,7 @@ namespace WorkStationC_
             mainSplit.Panel2.Controls.Add(outputLayout);
             mainSplit.Panel2MinSize = 120;
             mainSplit.Size = new Size(1534, 1317);
-            mainSplit.SplitterDistance = 521;
+            mainSplit.SplitterDistance = 489;
             mainSplit.SplitterWidth = 20;
             mainSplit.TabIndex = 2;
             // 
@@ -306,8 +249,6 @@ namespace WorkStationC_
             tabMain.Controls.Add(tabDownloads);
             tabMain.Controls.Add(tabConvert);
             tabMain.Controls.Add(tabOvmsPull);
-            tabMain.Controls.Add(tabTests);
-            tabMain.Controls.Add(tabServerTests);
             tabMain.Dock = DockStyle.Fill;
             tabMain.Font = new Font("Segoe UI", 10F);
             tabMain.Location = new Point(0, 0);
@@ -315,10 +256,9 @@ namespace WorkStationC_
             tabMain.Name = "tabMain";
             tabMain.Padding = new Point(14, 6);
             tabMain.SelectedIndex = 0;
-            tabMain.Size = new Size(1532, 519);
+            tabMain.Size = new Size(1532, 487);
             tabMain.TabIndex = 0;
             tabMain.DrawItem += tabMain_DrawItem;
-            tabMain.SelectedIndexChanged += tabMain_SelectedIndexChanged;
             tabMain.Selecting += tabMain_Selecting;
             // 
             // tabWorkstation
@@ -328,7 +268,7 @@ namespace WorkStationC_
             tabWorkstation.Margin = new Padding(4, 5, 4, 5);
             tabWorkstation.Name = "tabWorkstation";
             tabWorkstation.Padding = new Padding(17, 20, 17, 20);
-            tabWorkstation.Size = new Size(1524, 472);
+            tabWorkstation.Size = new Size(1524, 440);
             tabWorkstation.TabIndex = 0;
             tabWorkstation.Text = "Workstation";
             // 
@@ -671,7 +611,7 @@ namespace WorkStationC_
             tabDownloads.Margin = new Padding(4, 5, 4, 5);
             tabDownloads.Name = "tabDownloads";
             tabDownloads.Padding = new Padding(4, 5, 4, 5);
-            tabDownloads.Size = new Size(1524, 488);
+            tabDownloads.Size = new Size(1524, 456);
             tabDownloads.TabIndex = 4;
             tabDownloads.Text = "Downloads";
             // 
@@ -683,7 +623,7 @@ namespace WorkStationC_
             modelsScroll.Location = new Point(4, 5);
             modelsScroll.Margin = new Padding(4, 5, 4, 5);
             modelsScroll.Name = "modelsScroll";
-            modelsScroll.Size = new Size(1516, 478);
+            modelsScroll.Size = new Size(1516, 446);
             modelsScroll.TabIndex = 0;
             // 
             // modelsLayout
@@ -980,7 +920,7 @@ namespace WorkStationC_
             tabConvert.Margin = new Padding(4, 5, 4, 5);
             tabConvert.Name = "tabConvert";
             tabConvert.Padding = new Padding(17, 20, 17, 20);
-            tabConvert.Size = new Size(1524, 488);
+            tabConvert.Size = new Size(1524, 456);
             tabConvert.TabIndex = 5;
             tabConvert.Text = "Convert";
             // 
@@ -999,7 +939,7 @@ namespace WorkStationC_
             convertLayout.Margin = new Padding(4, 5, 4, 5);
             convertLayout.Name = "convertLayout";
             convertLayout.Padding = new Padding(14, 17, 14, 17);
-            convertLayout.Size = new Size(1490, 448);
+            convertLayout.Size = new Size(1490, 416);
             convertLayout.TabIndex = 0;
             // 
             // lblOmzBuilderHeading
@@ -1020,14 +960,14 @@ namespace WorkStationC_
             cboConvertSourceModel.Location = new Point(29, 117);
             cboConvertSourceModel.Margin = new Padding(4, 5, 4, 5);
             cboConvertSourceModel.Name = "cboConvertSourceModel";
-            cboConvertSourceModel.Size = new Size(1017, 36);
+            cboConvertSourceModel.Size = new Size(965, 36);
             cboConvertSourceModel.TabIndex = 32;
             cboConvertSourceModel.SelectedIndexChanged += cboConvertSourceModel_SelectedIndexChanged;
             // 
             // btnRefreshConvertModels
             // 
             btnRefreshConvertModels.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRefreshConvertModels.Location = new Point(1062, 112);
+            btnRefreshConvertModels.Location = new Point(1010, 112);
             btnRefreshConvertModels.Margin = new Padding(4, 5, 4, 5);
             btnRefreshConvertModels.Name = "btnRefreshConvertModels";
             btnRefreshConvertModels.Size = new Size(207, 57);
@@ -1078,7 +1018,7 @@ namespace WorkStationC_
             pnlIrVisualizer.Location = new Point(29, 450);
             pnlIrVisualizer.Margin = new Padding(4, 13, 4, 13);
             pnlIrVisualizer.Name = "pnlIrVisualizer";
-            pnlIrVisualizer.Size = new Size(1240, 415);
+            pnlIrVisualizer.Size = new Size(1188, 415);
             pnlIrVisualizer.TabIndex = 29;
             // 
             // lblIrPlaceholder
@@ -1110,7 +1050,7 @@ namespace WorkStationC_
             tabOvmsPull.Margin = new Padding(4, 5, 4, 5);
             tabOvmsPull.Name = "tabOvmsPull";
             tabOvmsPull.Padding = new Padding(17, 20, 17, 20);
-            tabOvmsPull.Size = new Size(1524, 488);
+            tabOvmsPull.Size = new Size(1524, 456);
             tabOvmsPull.TabIndex = 8;
             tabOvmsPull.Text = "OVMS Pull";
             // 
@@ -1151,7 +1091,7 @@ namespace WorkStationC_
             ovmsPullLayout.Margin = new Padding(4, 5, 4, 5);
             ovmsPullLayout.Name = "ovmsPullLayout";
             ovmsPullLayout.Padding = new Padding(14, 17, 14, 17);
-            ovmsPullLayout.Size = new Size(1490, 448);
+            ovmsPullLayout.Size = new Size(1490, 416);
             ovmsPullLayout.TabIndex = 0;
             // 
             // lblOvmsPullHeading
@@ -1198,7 +1138,7 @@ namespace WorkStationC_
             txtOvmsPythonPath.Location = new Point(943, 100);
             txtOvmsPythonPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsPythonPath.Name = "txtOvmsPythonPath";
-            txtOvmsPythonPath.Size = new Size(414, 34);
+            txtOvmsPythonPath.Size = new Size(362, 34);
             txtOvmsPythonPath.TabIndex = 4;
             txtOvmsPythonPath.TextChanged += txtOvmsPythonPath_TextChanged;
             // 
@@ -1217,7 +1157,7 @@ namespace WorkStationC_
             txtOvmsExportToolsPath.Location = new Point(214, 158);
             txtOvmsExportToolsPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsExportToolsPath.Name = "txtOvmsExportToolsPath";
-            txtOvmsExportToolsPath.Size = new Size(1142, 34);
+            txtOvmsExportToolsPath.Size = new Size(1090, 34);
             txtOvmsExportToolsPath.TabIndex = 6;
             txtOvmsExportToolsPath.TextChanged += txtOvmsExportToolsPath_TextChanged;
             // 
@@ -1351,7 +1291,7 @@ namespace WorkStationC_
             txtOvmsModelRepository.Location = new Point(943, 292);
             txtOvmsModelRepository.Margin = new Padding(4, 5, 4, 5);
             txtOvmsModelRepository.Name = "txtOvmsModelRepository";
-            txtOvmsModelRepository.Size = new Size(414, 34);
+            txtOvmsModelRepository.Size = new Size(362, 34);
             txtOvmsModelRepository.TabIndex = 20;
             txtOvmsModelRepository.TextChanged += txtOvmsModelRepository_TextChanged;
             // 
@@ -1370,7 +1310,7 @@ namespace WorkStationC_
             txtOvmsLogPath.Location = new Point(943, 358);
             txtOvmsLogPath.Margin = new Padding(4, 5, 4, 5);
             txtOvmsLogPath.Name = "txtOvmsLogPath";
-            txtOvmsLogPath.Size = new Size(414, 34);
+            txtOvmsLogPath.Size = new Size(362, 34);
             txtOvmsLogPath.TabIndex = 22;
             txtOvmsLogPath.TextChanged += txtOvmsLogPath_TextChanged;
             // 
@@ -1436,640 +1376,10 @@ namespace WorkStationC_
             lblOvmsPullStatus.Location = new Point(1029, 422);
             lblOvmsPullStatus.Margin = new Padding(4, 0, 4, 0);
             lblOvmsPullStatus.Name = "lblOvmsPullStatus";
-            lblOvmsPullStatus.Size = new Size(330, 57);
+            lblOvmsPullStatus.Size = new Size(278, 57);
             lblOvmsPullStatus.TabIndex = 28;
             lblOvmsPullStatus.Text = "Ready to build an OVMS pull command.";
             lblOvmsPullStatus.TextAlign = ContentAlignment.MiddleLeft;
-            // 
-            // tabTests
-            // 
-            tabTests.Controls.Add(testsLayout);
-            tabTests.Location = new Point(4, 43);
-            tabTests.Margin = new Padding(4, 5, 4, 5);
-            tabTests.Name = "tabTests";
-            tabTests.Padding = new Padding(17, 20, 17, 20);
-            tabTests.Size = new Size(1524, 488);
-            tabTests.TabIndex = 7;
-            tabTests.Text = "Tests";
-            // 
-            // testsLayout
-            // 
-            testsLayout.AutoScroll = true;
-            testsLayout.ColumnCount = 3;
-            testsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214F));
-            testsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            testsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214F));
-            testsLayout.Controls.Add(lblTestsHeading, 0, 0);
-            testsLayout.Controls.Add(lblTestModelPath, 0, 1);
-            testsLayout.Controls.Add(txtTestModelPath, 1, 1);
-            testsLayout.Controls.Add(lblInferImage, 0, 2);
-            testsLayout.Controls.Add(txtInferImage, 1, 2);
-            testsLayout.Controls.Add(imageTestButtons, 2, 2);
-            testsLayout.Controls.Add(lblInferText, 0, 3);
-            testsLayout.Controls.Add(txtInferText, 1, 3);
-            testsLayout.Controls.Add(lblInferLabels, 0, 4);
-            testsLayout.Controls.Add(txtInferLabels, 1, 4);
-            testsLayout.Controls.Add(btnBrowseInferLabels, 2, 4);
-            testsLayout.Controls.Add(lblInferPreset, 0, 5);
-            testsLayout.Controls.Add(cboInferPreset, 1, 5);
-            testsLayout.Controls.Add(btnInspectOpenVinoModel, 1, 6);
-            testsLayout.Controls.Add(lblTestsNote, 1, 7);
-            testsLayout.Controls.Add(lblImageResult, 0, 8);
-            testsLayout.Controls.Add(picImageResult, 1, 8);
-            testsLayout.Controls.Add(btnRunOpenVinoModelTest, 2, 3);
-            testsLayout.Dock = DockStyle.Fill;
-            testsLayout.Location = new Point(17, 20);
-            testsLayout.Margin = new Padding(4, 5, 4, 5);
-            testsLayout.Name = "testsLayout";
-            testsLayout.Padding = new Padding(14, 17, 14, 17);
-            testsLayout.RowCount = 9;
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 137F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 77F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60F));
-            testsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 367F));
-            testsLayout.Size = new Size(1490, 448);
-            testsLayout.TabIndex = 0;
-            // 
-            // lblTestsHeading
-            // 
-            lblTestsHeading.AutoSize = true;
-            testsLayout.SetColumnSpan(lblTestsHeading, 3);
-            lblTestsHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            lblTestsHeading.Location = new Point(18, 17);
-            lblTestsHeading.Margin = new Padding(4, 0, 4, 0);
-            lblTestsHeading.Name = "lblTestsHeading";
-            lblTestsHeading.Size = new Size(196, 28);
-            lblTestsHeading.TabIndex = 0;
-            lblTestsHeading.Text = "Loaded model tests";
-            // 
-            // lblTestModelPath
-            // 
-            lblTestModelPath.Anchor = AnchorStyles.Left;
-            lblTestModelPath.AutoSize = true;
-            lblTestModelPath.Location = new Point(18, 108);
-            lblTestModelPath.Margin = new Padding(4, 0, 4, 0);
-            lblTestModelPath.Name = "lblTestModelPath";
-            lblTestModelPath.Size = new Size(138, 28);
-            lblTestModelPath.TabIndex = 14;
-            lblTestModelPath.Text = "Loaded model";
-            // 
-            // txtTestModelPath
-            // 
-            testsLayout.SetColumnSpan(txtTestModelPath, 2);
-            txtTestModelPath.Dock = DockStyle.Fill;
-            txtTestModelPath.Location = new Point(232, 92);
-            txtTestModelPath.Margin = new Padding(4, 5, 4, 5);
-            txtTestModelPath.Name = "txtTestModelPath";
-            txtTestModelPath.ReadOnly = true;
-            txtTestModelPath.Size = new Size(1214, 34);
-            txtTestModelPath.TabIndex = 15;
-            // 
-            // lblInferImage
-            // 
-            lblInferImage.Anchor = AnchorStyles.Right;
-            lblInferImage.AutoSize = true;
-            lblInferImage.Location = new Point(63, 211);
-            lblInferImage.Margin = new Padding(4, 0, 4, 0);
-            lblInferImage.Name = "lblInferImage";
-            lblInferImage.Size = new Size(161, 28);
-            lblInferImage.TabIndex = 3;
-            lblInferImage.Text = "Image drop zone";
-            // 
-            // txtInferImage
-            // 
-            txtInferImage.AllowDrop = true;
-            txtInferImage.Dock = DockStyle.Fill;
-            txtInferImage.Location = new Point(232, 160);
-            txtInferImage.Margin = new Padding(4, 3, 4, 3);
-            txtInferImage.Name = "txtInferImage";
-            txtInferImage.PlaceholderText = "Drop one image here, or use Browse...";
-            txtInferImage.Size = new Size(1000, 34);
-            txtInferImage.TabIndex = 4;
-            txtInferImage.DragDrop += txtInferImage_DragDrop;
-            txtInferImage.DragEnter += txtInferImage_DragEnter;
-            txtInferImage.DragLeave += txtInferImage_DragLeave;
-            // 
-            // imageTestButtons
-            // 
-            imageTestButtons.Controls.Add(btnBrowseInferImage);
-            imageTestButtons.Controls.Add(btnRunImageTest);
-            imageTestButtons.Dock = DockStyle.Fill;
-            imageTestButtons.FlowDirection = FlowDirection.TopDown;
-            imageTestButtons.Location = new Point(1240, 159);
-            imageTestButtons.Margin = new Padding(4, 2, 4, 2);
-            imageTestButtons.Name = "imageTestButtons";
-            imageTestButtons.Size = new Size(206, 133);
-            imageTestButtons.TabIndex = 5;
-            imageTestButtons.WrapContents = false;
-            // 
-            // btnBrowseInferImage
-            // 
-            btnBrowseInferImage.Location = new Point(0, 0);
-            btnBrowseInferImage.Margin = new Padding(0, 0, 0, 7);
-            btnBrowseInferImage.Name = "btnBrowseInferImage";
-            btnBrowseInferImage.Size = new Size(206, 57);
-            btnBrowseInferImage.TabIndex = 0;
-            btnBrowseInferImage.Text = "Browse...";
-            btnBrowseInferImage.Click += btnBrowseInferImage_Click;
-            // 
-            // btnRunImageTest
-            // 
-            btnRunImageTest.Location = new Point(0, 64);
-            btnRunImageTest.Margin = new Padding(0);
-            btnRunImageTest.Name = "btnRunImageTest";
-            btnRunImageTest.Size = new Size(206, 57);
-            btnRunImageTest.TabIndex = 1;
-            btnRunImageTest.Text = "Run Image Test";
-            btnRunImageTest.Click += btnRunImageTest_Click;
-            // 
-            // lblInferText
-            // 
-            lblInferText.Anchor = AnchorStyles.Right;
-            lblInferText.AutoSize = true;
-            lblInferText.Location = new Point(140, 315);
-            lblInferText.Margin = new Padding(4, 0, 4, 0);
-            lblInferText.Name = "lblInferText";
-            lblInferText.Size = new Size(84, 28);
-            lblInferText.TabIndex = 6;
-            lblInferText.Text = "Test Text";
-            lblInferText.Click += lblInferText_Click;
-            // 
-            // txtInferText
-            // 
-            txtInferText.Dock = DockStyle.Fill;
-            txtInferText.Location = new Point(232, 297);
-            txtInferText.Margin = new Padding(4, 3, 4, 3);
-            txtInferText.Name = "txtInferText";
-            txtInferText.Size = new Size(1000, 34);
-            txtInferText.TabIndex = 7;
-            // 
-            // lblInferLabels
-            // 
-            lblInferLabels.Anchor = AnchorStyles.Right;
-            lblInferLabels.Location = new Point(157, 383);
-            lblInferLabels.Margin = new Padding(4, 0, 4, 0);
-            lblInferLabels.Name = "lblInferLabels";
-            lblInferLabels.Size = new Size(67, 32);
-            lblInferLabels.TabIndex = 8;
-            lblInferLabels.Text = "Labels";
-            // 
-            // txtInferLabels
-            // 
-            txtInferLabels.Dock = DockStyle.Fill;
-            txtInferLabels.Location = new Point(232, 367);
-            txtInferLabels.Margin = new Padding(4, 3, 4, 3);
-            txtInferLabels.Name = "txtInferLabels";
-            txtInferLabels.Size = new Size(1000, 34);
-            txtInferLabels.TabIndex = 9;
-            // 
-            // btnBrowseInferLabels
-            // 
-            btnBrowseInferLabels.Dock = DockStyle.Fill;
-            btnBrowseInferLabels.Location = new Point(1240, 366);
-            btnBrowseInferLabels.Margin = new Padding(4, 2, 4, 2);
-            btnBrowseInferLabels.Name = "btnBrowseInferLabels";
-            btnBrowseInferLabels.Size = new Size(206, 66);
-            btnBrowseInferLabels.TabIndex = 10;
-            btnBrowseInferLabels.Text = "Browse...";
-            btnBrowseInferLabels.Click += btnBrowseInferLabels_Click;
-            // 
-            // lblInferPreset
-            // 
-            lblInferPreset.Anchor = AnchorStyles.Right;
-            lblInferPreset.AutoSize = true;
-            lblInferPreset.Location = new Point(97, 455);
-            lblInferPreset.Margin = new Padding(4, 0, 4, 0);
-            lblInferPreset.Name = "lblInferPreset";
-            lblInferPreset.Size = new Size(127, 28);
-            lblInferPreset.TabIndex = 13;
-            lblInferPreset.Text = "Model Preset";
-            lblInferPreset.Click += lblInferPreset_Click;
-            // 
-            // cboInferPreset
-            // 
-            testsLayout.SetColumnSpan(cboInferPreset, 2);
-            cboInferPreset.Dock = DockStyle.Fill;
-            cboInferPreset.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboInferPreset.Items.AddRange(new object[] { "None / Generic", "OMZ MobileNet v2 PyTorch" });
-            cboInferPreset.Location = new Point(232, 437);
-            cboInferPreset.Margin = new Padding(4, 3, 4, 3);
-            cboInferPreset.Name = "cboInferPreset";
-            cboInferPreset.Size = new Size(1214, 36);
-            cboInferPreset.TabIndex = 14;
-            cboInferPreset.SelectedIndexChanged += cboInferPreset_SelectedIndexChanged;
-            // 
-            // btnInspectOpenVinoModel
-            // 
-            btnInspectOpenVinoModel.Location = new Point(232, 509);
-            btnInspectOpenVinoModel.Margin = new Padding(4, 5, 4, 5);
-            btnInspectOpenVinoModel.Name = "btnInspectOpenVinoModel";
-            btnInspectOpenVinoModel.Size = new Size(186, 57);
-            btnInspectOpenVinoModel.TabIndex = 18;
-            btnInspectOpenVinoModel.Text = "Inspect Loaded Model";
-            btnInspectOpenVinoModel.Click += btnInspectOpenVinoModel_Click;
-            // 
-            // lblTestsNote
-            // 
-            lblTestsNote.AutoSize = true;
-            testsLayout.SetColumnSpan(lblTestsNote, 2);
-            lblTestsNote.Location = new Point(232, 581);
-            lblTestsNote.Margin = new Padding(4, 0, 4, 0);
-            lblTestsNote.Name = "lblTestsNote";
-            lblTestsNote.Size = new Size(398, 28);
-            lblTestsNote.TabIndex = 20;
-            lblTestsNote.Text = "This tab uses the loaded Workstation model.";
-            // 
-            // lblImageResult
-            // 
-            lblImageResult.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            lblImageResult.AutoSize = true;
-            lblImageResult.Location = new Point(74, 658);
-            lblImageResult.Margin = new Padding(4, 17, 4, 0);
-            lblImageResult.Name = "lblImageResult";
-            lblImageResult.Size = new Size(150, 28);
-            lblImageResult.TabIndex = 22;
-            lblImageResult.Text = "Returned image";
-            // 
-            // picImageResult
-            // 
-            picImageResult.BackColor = Color.Black;
-            picImageResult.BorderStyle = BorderStyle.FixedSingle;
-            testsLayout.SetColumnSpan(picImageResult, 2);
-            picImageResult.Dock = DockStyle.Fill;
-            picImageResult.Location = new Point(232, 646);
-            picImageResult.Margin = new Padding(4, 5, 4, 5);
-            picImageResult.Name = "picImageResult";
-            picImageResult.Size = new Size(1214, 357);
-            picImageResult.SizeMode = PictureBoxSizeMode.Zoom;
-            picImageResult.TabIndex = 23;
-            picImageResult.TabStop = false;
-            // 
-            // btnRunOpenVinoModelTest
-            // 
-            btnRunOpenVinoModelTest.Dock = DockStyle.Fill;
-            btnRunOpenVinoModelTest.Location = new Point(1240, 299);
-            btnRunOpenVinoModelTest.Margin = new Padding(4, 5, 4, 5);
-            btnRunOpenVinoModelTest.Name = "btnRunOpenVinoModelTest";
-            btnRunOpenVinoModelTest.Size = new Size(206, 60);
-            btnRunOpenVinoModelTest.TabIndex = 19;
-            btnRunOpenVinoModelTest.Text = "Send Message";
-            btnRunOpenVinoModelTest.Click += btnRunOpenVinoModelTest_Click;
-            // 
-            // tabServerTests
-            // 
-            tabServerTests.Controls.Add(serverTestsLayout);
-            tabServerTests.Location = new Point(4, 43);
-            tabServerTests.Margin = new Padding(4, 5, 4, 5);
-            tabServerTests.Name = "tabServerTests";
-            tabServerTests.Padding = new Padding(17, 20, 17, 20);
-            tabServerTests.Size = new Size(1524, 488);
-            tabServerTests.TabIndex = 8;
-            tabServerTests.Text = "Server Tests";
-            // 
-            // serverTestsLayout
-            // 
-            serverTestsLayout.AutoScroll = true;
-            serverTestsLayout.ColumnCount = 3;
-            serverTestsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214F));
-            serverTestsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            serverTestsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 214F));
-            serverTestsLayout.Controls.Add(lblOpenVinoRuntimeHeading, 0, 0);
-            serverTestsLayout.Controls.Add(txtServerEndpointList, 0, 1);
-            serverTestsLayout.Controls.Add(lblTestApiKey, 0, 2);
-            serverTestsLayout.Controls.Add(txtTestApiKey, 1, 2);
-            serverTestsLayout.Controls.Add(lblServerNoInputHeading, 0, 3);
-            serverTestsLayout.Controls.Add(lblTestEndpoint, 0, 4);
-            serverTestsLayout.Controls.Add(txtTestEndpoint, 1, 4);
-            serverTestsLayout.Controls.Add(btnTestEndpoint, 2, 4);
-            serverTestsLayout.Controls.Add(lblModelsEndpoint, 0, 5);
-            serverTestsLayout.Controls.Add(txtModelsEndpoint, 1, 5);
-            serverTestsLayout.Controls.Add(btnTestModelsEndpoint, 2, 5);
-            serverTestsLayout.Controls.Add(lblServerUserInputHeading, 0, 6);
-            serverTestsLayout.Controls.Add(lblChatModel, 0, 7);
-            serverTestsLayout.Controls.Add(cboServerModel, 1, 7);
-            serverTestsLayout.Controls.Add(lblChatPrompt, 0, 8);
-            serverTestsLayout.Controls.Add(txtChatPrompt, 1, 8);
-            serverTestsLayout.Controls.Add(lblChatEndpoint, 0, 9);
-            serverTestsLayout.Controls.Add(txtChatEndpoint, 1, 9);
-            serverTestsLayout.Controls.Add(btnTestChat, 2, 9);
-            serverTestsLayout.Controls.Add(lblTextEndpoint, 0, 10);
-            serverTestsLayout.Controls.Add(txtTextEndpoint, 1, 10);
-            serverTestsLayout.Controls.Add(btnTestTextEndpoint, 2, 10);
-            serverTestsLayout.Controls.Add(lblImageEndpoint, 0, 11);
-            serverTestsLayout.Controls.Add(txtImageEndpoint, 1, 11);
-            serverTestsLayout.Controls.Add(btnTestImageEndpoint, 2, 11);
-            serverTestsLayout.Controls.Add(btnShowServerSettings, 2, 12);
-            serverTestsLayout.Dock = DockStyle.Fill;
-            serverTestsLayout.Location = new Point(17, 20);
-            serverTestsLayout.Margin = new Padding(4, 5, 4, 5);
-            serverTestsLayout.Name = "serverTestsLayout";
-            serverTestsLayout.Padding = new Padding(14, 17, 14, 17);
-            serverTestsLayout.RowCount = 13;
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 197F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 183F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-            serverTestsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 77F));
-            serverTestsLayout.Size = new Size(1490, 448);
-            serverTestsLayout.TabIndex = 0;
-            // 
-            // lblOpenVinoRuntimeHeading
-            // 
-            lblOpenVinoRuntimeHeading.AutoSize = true;
-            serverTestsLayout.SetColumnSpan(lblOpenVinoRuntimeHeading, 3);
-            lblOpenVinoRuntimeHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            lblOpenVinoRuntimeHeading.Location = new Point(18, 17);
-            lblOpenVinoRuntimeHeading.Margin = new Padding(4, 0, 4, 0);
-            lblOpenVinoRuntimeHeading.Name = "lblOpenVinoRuntimeHeading";
-            lblOpenVinoRuntimeHeading.Size = new Size(144, 28);
-            lblOpenVinoRuntimeHeading.TabIndex = 13;
-            lblOpenVinoRuntimeHeading.Text = "API endpoints";
-            // 
-            // txtServerEndpointList
-            // 
-            serverTestsLayout.SetColumnSpan(txtServerEndpointList, 3);
-            txtServerEndpointList.Dock = DockStyle.Fill;
-            txtServerEndpointList.Location = new Point(18, 92);
-            txtServerEndpointList.Margin = new Padding(4, 5, 4, 5);
-            txtServerEndpointList.Multiline = true;
-            txtServerEndpointList.Name = "txtServerEndpointList";
-            txtServerEndpointList.ReadOnly = true;
-            txtServerEndpointList.ScrollBars = ScrollBars.Vertical;
-            txtServerEndpointList.Size = new Size(1428, 187);
-            txtServerEndpointList.TabIndex = 37;
-            txtServerEndpointList.Text = resources.GetString("txtServerEndpointList.Text");
-            // 
-            // lblTestApiKey
-            // 
-            lblTestApiKey.Anchor = AnchorStyles.Left;
-            lblTestApiKey.AutoSize = true;
-            lblTestApiKey.Location = new Point(18, 305);
-            lblTestApiKey.Margin = new Padding(4, 0, 4, 0);
-            lblTestApiKey.Name = "lblTestApiKey";
-            lblTestApiKey.Size = new Size(136, 28);
-            lblTestApiKey.TabIndex = 4;
-            lblTestApiKey.Text = "Server API key";
-            // 
-            // txtTestApiKey
-            // 
-            serverTestsLayout.SetColumnSpan(txtTestApiKey, 2);
-            txtTestApiKey.Dock = DockStyle.Fill;
-            txtTestApiKey.Location = new Point(232, 289);
-            txtTestApiKey.Margin = new Padding(4, 5, 4, 5);
-            txtTestApiKey.Name = "txtTestApiKey";
-            txtTestApiKey.Size = new Size(1214, 34);
-            txtTestApiKey.TabIndex = 5;
-            txtTestApiKey.UseSystemPasswordChar = true;
-            // 
-            // lblServerNoInputHeading
-            // 
-            lblServerNoInputHeading.AutoSize = true;
-            serverTestsLayout.SetColumnSpan(lblServerNoInputHeading, 3);
-            lblServerNoInputHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            lblServerNoInputHeading.Location = new Point(18, 354);
-            lblServerNoInputHeading.Margin = new Padding(4, 0, 4, 0);
-            lblServerNoInputHeading.Name = "lblServerNoInputHeading";
-            lblServerNoInputHeading.Size = new Size(370, 28);
-            lblServerNoInputHeading.TabIndex = 38;
-            lblServerNoInputHeading.Text = "Server tests without prompt or image";
-            // 
-            // lblTestEndpoint
-            // 
-            lblTestEndpoint.Anchor = AnchorStyles.Left;
-            lblTestEndpoint.AutoSize = true;
-            lblTestEndpoint.Location = new Point(18, 445);
-            lblTestEndpoint.Margin = new Padding(4, 0, 4, 0);
-            lblTestEndpoint.Name = "lblTestEndpoint";
-            lblTestEndpoint.Size = new Size(90, 28);
-            lblTestEndpoint.TabIndex = 1;
-            lblTestEndpoint.Text = "Tags URL";
-            // 
-            // txtTestEndpoint
-            // 
-            txtTestEndpoint.Dock = DockStyle.Fill;
-            txtTestEndpoint.Location = new Point(232, 429);
-            txtTestEndpoint.Margin = new Padding(4, 5, 4, 5);
-            txtTestEndpoint.Name = "txtTestEndpoint";
-            txtTestEndpoint.Size = new Size(1000, 34);
-            txtTestEndpoint.TabIndex = 2;
-            txtTestEndpoint.Text = "http://192.168.0.11:11434/api/tags";
-            // 
-            // btnTestEndpoint
-            // 
-            btnTestEndpoint.Location = new Point(1240, 429);
-            btnTestEndpoint.Margin = new Padding(4, 5, 4, 5);
-            btnTestEndpoint.Name = "btnTestEndpoint";
-            btnTestEndpoint.Size = new Size(186, 57);
-            btnTestEndpoint.TabIndex = 3;
-            btnTestEndpoint.Text = "Test Tags URL";
-            btnTestEndpoint.Click += btnTestEndpoint_Click;
-            // 
-            // lblModelsEndpoint
-            // 
-            lblModelsEndpoint.Anchor = AnchorStyles.Left;
-            lblModelsEndpoint.AutoSize = true;
-            lblModelsEndpoint.Location = new Point(18, 515);
-            lblModelsEndpoint.Margin = new Padding(4, 0, 4, 0);
-            lblModelsEndpoint.Name = "lblModelsEndpoint";
-            lblModelsEndpoint.Size = new Size(117, 28);
-            lblModelsEndpoint.TabIndex = 40;
-            lblModelsEndpoint.Text = "Models URL";
-            // 
-            // txtModelsEndpoint
-            // 
-            txtModelsEndpoint.Dock = DockStyle.Fill;
-            txtModelsEndpoint.Location = new Point(232, 499);
-            txtModelsEndpoint.Margin = new Padding(4, 5, 4, 5);
-            txtModelsEndpoint.Name = "txtModelsEndpoint";
-            txtModelsEndpoint.Size = new Size(1000, 34);
-            txtModelsEndpoint.TabIndex = 41;
-            txtModelsEndpoint.Text = "http://192.168.0.11:11434/v1/models";
-            // 
-            // btnTestModelsEndpoint
-            // 
-            btnTestModelsEndpoint.Location = new Point(1240, 499);
-            btnTestModelsEndpoint.Margin = new Padding(4, 5, 4, 5);
-            btnTestModelsEndpoint.Name = "btnTestModelsEndpoint";
-            btnTestModelsEndpoint.Size = new Size(186, 57);
-            btnTestModelsEndpoint.TabIndex = 42;
-            btnTestModelsEndpoint.Text = "Test Models";
-            btnTestModelsEndpoint.Click += btnTestModelsEndpoint_Click;
-            // 
-            // lblServerUserInputHeading
-            // 
-            lblServerUserInputHeading.AutoSize = true;
-            serverTestsLayout.SetColumnSpan(lblServerUserInputHeading, 3);
-            lblServerUserInputHeading.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            lblServerUserInputHeading.Location = new Point(18, 564);
-            lblServerUserInputHeading.Margin = new Padding(4, 0, 4, 0);
-            lblServerUserInputHeading.Name = "lblServerUserInputHeading";
-            lblServerUserInputHeading.Size = new Size(338, 28);
-            lblServerUserInputHeading.TabIndex = 39;
-            lblServerUserInputHeading.Text = "Server tests with prompt or image";
-            // 
-            // lblChatModel
-            // 
-            lblChatModel.Anchor = AnchorStyles.Left;
-            lblChatModel.AutoSize = true;
-            lblChatModel.Location = new Point(18, 655);
-            lblChatModel.Margin = new Padding(4, 0, 4, 0);
-            lblChatModel.Name = "lblChatModel";
-            lblChatModel.Size = new Size(181, 28);
-            lblChatModel.TabIndex = 8;
-            lblChatModel.Text = "Server model name";
-            // 
-            // cboServerModel
-            // 
-            cboServerModel.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-            cboServerModel.AutoCompleteSource = AutoCompleteSource.ListItems;
-            serverTestsLayout.SetColumnSpan(cboServerModel, 2);
-            cboServerModel.Dock = DockStyle.Fill;
-            cboServerModel.FormattingEnabled = true;
-            cboServerModel.Location = new Point(232, 639);
-            cboServerModel.Margin = new Padding(4, 5, 4, 5);
-            cboServerModel.Name = "cboServerModel";
-            cboServerModel.Size = new Size(1214, 36);
-            cboServerModel.TabIndex = 9;
-            // 
-            // lblChatPrompt
-            // 
-            lblChatPrompt.Anchor = AnchorStyles.Left;
-            lblChatPrompt.AutoSize = true;
-            lblChatPrompt.Location = new Point(18, 781);
-            lblChatPrompt.Margin = new Padding(4, 0, 4, 0);
-            lblChatPrompt.Name = "lblChatPrompt";
-            lblChatPrompt.Size = new Size(139, 28);
-            lblChatPrompt.TabIndex = 10;
-            lblChatPrompt.Text = "Server prompt";
-            // 
-            // txtChatPrompt
-            // 
-            serverTestsLayout.SetColumnSpan(txtChatPrompt, 2);
-            txtChatPrompt.Dock = DockStyle.Fill;
-            txtChatPrompt.Location = new Point(232, 709);
-            txtChatPrompt.Margin = new Padding(4, 5, 4, 5);
-            txtChatPrompt.Multiline = true;
-            txtChatPrompt.Name = "txtChatPrompt";
-            txtChatPrompt.ScrollBars = ScrollBars.Vertical;
-            txtChatPrompt.Size = new Size(1214, 173);
-            txtChatPrompt.TabIndex = 11;
-            txtChatPrompt.Text = "Reply with one short sentence confirming the chat endpoint is working.";
-            // 
-            // lblChatEndpoint
-            // 
-            lblChatEndpoint.Anchor = AnchorStyles.Left;
-            lblChatEndpoint.AutoSize = true;
-            lblChatEndpoint.Location = new Point(18, 908);
-            lblChatEndpoint.Margin = new Padding(4, 0, 4, 0);
-            lblChatEndpoint.Name = "lblChatEndpoint";
-            lblChatEndpoint.Size = new Size(163, 28);
-            lblChatEndpoint.TabIndex = 6;
-            lblChatEndpoint.Text = "Completions URL";
-            // 
-            // txtChatEndpoint
-            // 
-            txtChatEndpoint.Dock = DockStyle.Fill;
-            txtChatEndpoint.Location = new Point(232, 892);
-            txtChatEndpoint.Margin = new Padding(4, 5, 4, 5);
-            txtChatEndpoint.Name = "txtChatEndpoint";
-            txtChatEndpoint.Size = new Size(1000, 34);
-            txtChatEndpoint.TabIndex = 7;
-            txtChatEndpoint.Text = "http://192.168.0.11:11434/v1/chat/completions";
-            // 
-            // btnTestChat
-            // 
-            btnTestChat.Location = new Point(1240, 892);
-            btnTestChat.Margin = new Padding(4, 5, 4, 5);
-            btnTestChat.Name = "btnTestChat";
-            btnTestChat.Size = new Size(186, 57);
-            btnTestChat.TabIndex = 12;
-            btnTestChat.Text = "Test Completions";
-            btnTestChat.Click += btnTestChat_Click;
-            // 
-            // lblTextEndpoint
-            // 
-            lblTextEndpoint.Anchor = AnchorStyles.Left;
-            lblTextEndpoint.AutoSize = true;
-            lblTextEndpoint.Location = new Point(18, 978);
-            lblTextEndpoint.Margin = new Padding(4, 0, 4, 0);
-            lblTextEndpoint.Name = "lblTextEndpoint";
-            lblTextEndpoint.Size = new Size(86, 28);
-            lblTextEndpoint.TabIndex = 31;
-            lblTextEndpoint.Text = "Text URL";
-            // 
-            // txtTextEndpoint
-            // 
-            txtTextEndpoint.Dock = DockStyle.Fill;
-            txtTextEndpoint.Location = new Point(232, 962);
-            txtTextEndpoint.Margin = new Padding(4, 5, 4, 5);
-            txtTextEndpoint.Name = "txtTextEndpoint";
-            txtTextEndpoint.Size = new Size(1000, 34);
-            txtTextEndpoint.TabIndex = 32;
-            txtTextEndpoint.Text = "http://192.168.0.11:11434/v1/completions";
-            // 
-            // btnTestTextEndpoint
-            // 
-            btnTestTextEndpoint.Location = new Point(1240, 962);
-            btnTestTextEndpoint.Margin = new Padding(4, 5, 4, 5);
-            btnTestTextEndpoint.Name = "btnTestTextEndpoint";
-            btnTestTextEndpoint.Size = new Size(186, 57);
-            btnTestTextEndpoint.TabIndex = 33;
-            btnTestTextEndpoint.Text = "Test Text";
-            btnTestTextEndpoint.Click += btnTestTextEndpoint_Click;
-            // 
-            // lblImageEndpoint
-            // 
-            lblImageEndpoint.Anchor = AnchorStyles.Left;
-            lblImageEndpoint.AutoSize = true;
-            lblImageEndpoint.Location = new Point(18, 1048);
-            lblImageEndpoint.Margin = new Padding(4, 0, 4, 0);
-            lblImageEndpoint.Name = "lblImageEndpoint";
-            lblImageEndpoint.Size = new Size(106, 28);
-            lblImageEndpoint.TabIndex = 34;
-            lblImageEndpoint.Text = "Image URL";
-            // 
-            // txtImageEndpoint
-            // 
-            txtImageEndpoint.Dock = DockStyle.Fill;
-            txtImageEndpoint.Location = new Point(232, 1032);
-            txtImageEndpoint.Margin = new Padding(4, 5, 4, 5);
-            txtImageEndpoint.Name = "txtImageEndpoint";
-            txtImageEndpoint.Size = new Size(1000, 34);
-            txtImageEndpoint.TabIndex = 35;
-            txtImageEndpoint.Text = "http://192.168.0.11:11434/v1/images/generations";
-            // 
-            // btnTestImageEndpoint
-            // 
-            btnTestImageEndpoint.Location = new Point(1240, 1032);
-            btnTestImageEndpoint.Margin = new Padding(4, 5, 4, 5);
-            btnTestImageEndpoint.Name = "btnTestImageEndpoint";
-            btnTestImageEndpoint.Size = new Size(186, 57);
-            btnTestImageEndpoint.TabIndex = 36;
-            btnTestImageEndpoint.Text = "Test Image";
-            btnTestImageEndpoint.Click += btnTestImageEndpoint_Click;
-            // 
-            // btnShowServerSettings
-            // 
-            btnShowServerSettings.Location = new Point(1240, 1102);
-            btnShowServerSettings.Margin = new Padding(4, 5, 4, 5);
-            btnShowServerSettings.Name = "btnShowServerSettings";
-            btnShowServerSettings.Size = new Size(186, 57);
-            btnShowServerSettings.TabIndex = 21;
-            btnShowServerSettings.Text = "Show URLs";
-            btnShowServerSettings.Click += btnShowServerSettings_Click;
             // 
             // outputLayout
             // 
@@ -2084,7 +1394,7 @@ namespace WorkStationC_
             outputLayout.RowCount = 2;
             outputLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 97F));
-            outputLayout.Size = new Size(1532, 774);
+            outputLayout.Size = new Size(1532, 806);
             outputLayout.TabIndex = 0;
             // 
             // grpOutput
@@ -2095,7 +1405,7 @@ namespace WorkStationC_
             grpOutput.Margin = new Padding(4, 5, 4, 5);
             grpOutput.Name = "grpOutput";
             grpOutput.Padding = new Padding(4, 5, 4, 5);
-            grpOutput.Size = new Size(1524, 667);
+            grpOutput.Size = new Size(1524, 699);
             grpOutput.TabIndex = 0;
             grpOutput.TabStop = false;
             grpOutput.Text = "Output";
@@ -2113,7 +1423,7 @@ namespace WorkStationC_
             outputContentLayout.RowCount = 2;
             outputContentLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
             outputContentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            outputContentLayout.Size = new Size(1516, 633);
+            outputContentLayout.Size = new Size(1516, 665);
             outputContentLayout.TabIndex = 0;
             // 
             // lblOutputInfo
@@ -2139,7 +1449,7 @@ namespace WorkStationC_
             txtOutput.Margin = new Padding(4, 5, 4, 5);
             txtOutput.Name = "txtOutput";
             txtOutput.ReadOnly = true;
-            txtOutput.Size = new Size(1508, 583);
+            txtOutput.Size = new Size(1508, 615);
             txtOutput.TabIndex = 1;
             txtOutput.Text = "OpenVINO Workbench layout initialized.\n";
             // 
@@ -2153,7 +1463,7 @@ namespace WorkStationC_
             outputButtons.Controls.Add(activityLayout, 1, 0);
             outputButtons.Controls.Add(btnHelp, 2, 0);
             outputButtons.Dock = DockStyle.Fill;
-            outputButtons.Location = new Point(4, 682);
+            outputButtons.Location = new Point(4, 714);
             outputButtons.Margin = new Padding(4, 5, 4, 5);
             outputButtons.Name = "outputButtons";
             outputButtons.Padding = new Padding(0, 10, 0, 0);
@@ -2440,14 +1750,6 @@ namespace WorkStationC_
             tabOvmsPull.ResumeLayout(false);
             ovmsPullLayout.ResumeLayout(false);
             ovmsPullLayout.PerformLayout();
-            tabTests.ResumeLayout(false);
-            testsLayout.ResumeLayout(false);
-            testsLayout.PerformLayout();
-            imageTestButtons.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)picImageResult).EndInit();
-            tabServerTests.ResumeLayout(false);
-            serverTestsLayout.ResumeLayout(false);
-            serverTestsLayout.PerformLayout();
             outputLayout.ResumeLayout(false);
             grpOutput.ResumeLayout(false);
             outputContentLayout.ResumeLayout(false);
@@ -2491,10 +1793,9 @@ namespace WorkStationC_
 
         private TableLayoutPanel mainLayout; private Label lblTitle; private Label lblSubtitle; private SplitContainer mainSplit; private TabControl tabMain;
         private TabPage tabWorkstation; private TableLayoutPanel workstationLayout; private Label lblWorkstationHeading; private TableLayoutPanel modelRootLayout; private Label lblModelRoot; private TextBox txtModelRoot; private Button btnBrowseModelRoot; private Button btnCheckWorkstation; private Label lblWorkstationTarget; private ComboBox cboWorkstationTarget; private Label lblWorkstationMultiTarget; private ComboBox cboWorkstationMultiTarget; private Label lblModelCapabilities; private TextBox txtModelCapabilities;
-private Label lblInferModel; private TextBox txtInferModel; private Button btnBrowseInferModel; private Button btnUseSampleModel; private Label lblInferImage; private TextBox txtInferImage; private FlowLayoutPanel imageTestButtons; private Button btnBrowseInferImage; private Button btnRunImageTest; private Label lblInferText; private TextBox txtInferText; private Button btnBrowseInferLabels; private Label lblInferLabels; private TextBox txtInferLabels; private Label lblInferPreset; private ComboBox cboInferPreset;
-        private TabPage tabDownloads; private Panel modelsScroll; private Panel modelsLayout; private TabPage tabConvert; private Panel convertLayout; private Button btnDeleteDownload; private Label lblModelWebsites; private ComboBox cboModelWebsites; private Button btnOpenModelWebsite; private Button btnAddModelWebsite; private Button btnDeleteModelWebsite; private Label lblHfQuery; private TextBox txtHfQuery; private Button btnSearchRepos; private Button btnSearchAllModels; private Button btnPresetHuggingFace; private Button btnPresetOpenVino; private Button btnPresetIntel; private Button btnPresetUltralytics; private Button btnPresetOllama; private Button btnOfficialFiles; private Button btnRefreshOfficialIndex; private ListView lstHfRepos; private ColumnHeader colModelId; private ColumnHeader colDownloads; private ColumnHeader colLikes; private ColumnHeader colModelSource; private ColumnHeader colTask; private ColumnHeader colLibrary; private ColumnHeader colQuantization; private Button btnLoadFiles; private Button btnClearFileSelection; private Button btnDownloadHelp; private Label lblRepoId; private TextBox txtRepoId; private Label lblRevision; private TextBox txtRevision; private Label lblDownloadUrl; private TextBox txtDownloadUrl; private Button btnCopyDownloadUrl; private ListView lstHfFiles; private ColumnHeader colFilePath; private ColumnHeader colFileType; private ColumnHeader colFileExtension; private ColumnHeader colFileSize; private ColumnHeader colFileNotes; private ProgressBar progressDownload; private Label lblDownloadStatus; private Button btnCancelDownload; private Label modelsSeparator2; private Label lblOmzBuilderHeading; private ComboBox cboConvertSourceModel; private Button btnRefreshConvertModels; private GroupBox grpConvertOutputs; private CheckBox chkConvertBlob; private Button btnConvertToIr; private Panel pnlIrVisualizer; private Label lblIrPlaceholder; private Label lblModelsStatus;
+private Label lblInferModel; private TextBox txtInferModel; private Button btnBrowseInferModel; private Button btnUseSampleModel;         private TabPage tabDownloads; private Panel modelsScroll; private Panel modelsLayout; private TabPage tabConvert; private Panel convertLayout; private Button btnDeleteDownload; private Label lblModelWebsites; private ComboBox cboModelWebsites; private Button btnOpenModelWebsite; private Button btnAddModelWebsite; private Button btnDeleteModelWebsite; private Label lblHfQuery; private TextBox txtHfQuery; private Button btnSearchRepos; private Button btnSearchAllModels; private Button btnPresetHuggingFace; private Button btnPresetOpenVino; private Button btnPresetIntel; private Button btnPresetUltralytics; private Button btnPresetOllama; private Button btnOfficialFiles; private Button btnRefreshOfficialIndex; private ListView lstHfRepos; private ColumnHeader colModelId; private ColumnHeader colDownloads; private ColumnHeader colLikes; private ColumnHeader colModelSource; private ColumnHeader colTask; private ColumnHeader colLibrary; private ColumnHeader colQuantization; private Button btnLoadFiles; private Button btnClearFileSelection; private Button btnDownloadHelp; private Label lblRepoId; private TextBox txtRepoId; private Label lblRevision; private TextBox txtRevision; private Label lblDownloadUrl; private TextBox txtDownloadUrl; private Button btnCopyDownloadUrl; private ListView lstHfFiles; private ColumnHeader colFilePath; private ColumnHeader colFileType; private ColumnHeader colFileExtension; private ColumnHeader colFileSize; private ColumnHeader colFileNotes; private ProgressBar progressDownload; private Label lblDownloadStatus; private Button btnCancelDownload; private Label modelsSeparator2; private Label lblOmzBuilderHeading; private ComboBox cboConvertSourceModel; private Button btnRefreshConvertModels; private GroupBox grpConvertOutputs; private CheckBox chkConvertBlob; private Button btnConvertToIr; private Panel pnlIrVisualizer; private Label lblIrPlaceholder; private Label lblModelsStatus;
         private TabPage tabOvmsPull; private Panel ovmsPullLayout; private Label lblOvmsPullHeading; private Label lblOvmsExecutable; private TextBox txtOvmsExecutable; private Label lblOvmsPythonPath; private TextBox txtOvmsPythonPath; private Label lblOvmsExportToolsPath; private TextBox txtOvmsExportToolsPath; private Label lblOvmsSourceFormat; private ComboBox cboOvmsSourceFormat; private Label lblOvmsTask; private ComboBox cboOvmsTask; private Label lblOvmsPipelineType; private ComboBox cboOvmsPipelineType; private Label lblOvmsWeightFormat; private ComboBox cboOvmsWeightFormat; private Label lblOvmsSourceModel; private ComboBox cboOvmsSourceModel; private Label lblOvmsGgufFilename; private TextBox txtOvmsGgufFilename; private Label lblOvmsModelRepository; private TextBox txtOvmsModelRepository; private Label lblOvmsLogPath; private TextBox txtOvmsLogPath; private CheckBox chkOvmsOverwrite; private CheckBox chkOvmsDebug; private Button btnCheckOvmsVersions; private Button btnPreviewOvmsPull; private Button btnRunOvmsPull; private Label lblOvmsPullStatus;
-        private TabPage tabTests; private TableLayoutPanel testsLayout; private Label lblTestsHeading; private Label lblTestModelPath; private TextBox txtTestModelPath; private Button btnInspectOpenVinoModel; private Button btnRunOpenVinoModelTest; private Label lblTestsNote; private Label lblImageResult; private PictureBox picImageResult; private TabPage tabServerTests; private TableLayoutPanel serverTestsLayout; private TextBox txtServerEndpointList; private Label lblServerNoInputHeading; private Label lblServerUserInputHeading; private Label lblTestEndpoint; private TextBox txtTestEndpoint; private Button btnTestEndpoint; private Label lblModelsEndpoint; private TextBox txtModelsEndpoint; private Button btnTestModelsEndpoint; private Label lblTestApiKey; private TextBox txtTestApiKey; private Label lblChatEndpoint; private TextBox txtChatEndpoint; private Label lblTextEndpoint; private TextBox txtTextEndpoint; private Button btnTestTextEndpoint; private Label lblImageEndpoint; private TextBox txtImageEndpoint; private Button btnTestImageEndpoint; private Label lblChatModel; private ComboBox cboServerModel; private Label lblChatPrompt; private TextBox txtChatPrompt; private Button btnTestChat; private Button btnShowServerSettings; private Label lblOpenVinoRuntimeHeading; private Label lblLocalServerUrl; private TextBox txtLocalServerUrl; private Button btnStartLocalServer; private Label lblLocalServerStatus; private TextBox txtLocalServerStatus; private Button btnStopLocalServer;
+private Label lblLocalServerUrl; private TextBox txtLocalServerUrl; private Button btnStartLocalServer; private Label lblLocalServerStatus; private TextBox txtLocalServerStatus; private Button btnStopLocalServer;
         private TableLayoutPanel outputLayout; private GroupBox grpOutput; private TableLayoutPanel outputContentLayout; private Label lblOutputInfo; private RichTextBox txtOutput; private TableLayoutPanel outputButtons; private Button btnClearOutput; private TableLayoutPanel activityLayout; private Label lblActivityStatus; private ProgressBar progressActivity; private Button btnCancelActivity; private Button btnHelp;
         private Button btnLoadModel;
         private SplitContainer splitContainer1;
