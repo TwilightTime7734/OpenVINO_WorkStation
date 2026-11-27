@@ -2,15 +2,19 @@
 
 This file is the working source of truth for future Codex/ChatGPT sessions. Keep it clean, current, and practical. Remove stale notes instead of adding contradictory layers.
 
-## Current state - 2026-08-22
+## Current state - 2026-09-07
 
-- The project is a .NET 10 C# WinForms OpenVINO WorkStation/Workbench application.
-- The previous `Tests` tab and `Server Tests` tab have been removed from the UI.
-- The `Tests` and `ServerTests` folders are currently excluded from the project but have not been deleted yet. Leave them excluded until the refactor is stable; delete them only when the user explicitly decides the cleanup is complete.
-- After removing the two test tabs and most test-only code, `Form1.cs` is still roughly 11,000 lines. The project rebuilds with 0 errors; two existing unreachable-code warnings may remain during the refactor.
-- The current refactor goal is to return the application to clear object-oriented structure: real classes for models/state/services/controllers, enums for fixed categorical values, and thin WinForms event handlers in `Form1.cs`.
-- Refactor the old `Common` region first so shared state/types have an authoritative home before tab code is extracted.
-- Refactor incrementally. After each meaningful extraction, rebuild before moving to the next area.
+- This is a .NET 10 C# WinForms OpenVINO workbench with four tabs: Workstation, Chat, Downloads, and OVMS Pull.
+- 2026-11-25: Workstation now serves the selected model by starting `ovms.exe` (`Workstation/OvmsServer.cs`) with `--model_path --model_name --task --target_device --rest_port 8000 --port 9000`, bound to 127.0.0.1, using the OVMS program and Python folder from the OVMS Pull tab. Load Model waits until `/v1/config` reports the model AVAILABLE; Unload Model and closing the app stop that process. Connect checks a server started outside the app. The Chat tab (`Chat/`) streams `/v3/chat/completions` from whatever server is at the Server address. The in-app GenAI loader and Kestrel server are no longer wired to the UI because they also used port 8000. The machine currently reports one GPU, `GPU.0`; multi-GPU targets are sent to OVMS as `HETERO:...`.
+- The user requested KISS simplification, authorized removing obsolete code, and has their own backup. Do not create unnecessary backups.
+- The user supplied `D:/Example/Project/Form1.cs` as a reference for a small form. `Form1.cs` is now about 150 lines of startup, named handlers, output, progress, and shutdown. Keep feature logic in the tab classes and runtime services. See `CODE_MAP.md`.
+- `ModelSession` owns the loaded model and serializes loading, server generation, and disposal. The model folder and target controls are the selection; changing them takes effect on the next Load Model action. `ChatModel` owns the cached GenAI pipeline.
+- Downloads share one file-transfer routine. Native OpenVINO models are read directly by OpenVINO Core before marking them loaded.
+- OVMS defaults, four model presets, and expected package versions live in `ovms-settings.json`; runtime code does not parse this document.
+- The local API uses ASP.NET Core Kestrel, binds only to loopback, and exposes only the model loaded on Workstation. Requests never scan folders or switch models automatically.
+- The local API exposes model listing/retrieval, chat completions, and text completions under both OVMS-style `/v3` and existing `/v1` paths. Native generation callbacks now stream immediately as flushed SSE events. Disconnects cancel generation; optional usage chunks report native token counts. LLM chat retains message roles. See `LocalServer/README.md` for Open WebUI setup and the remaining OVMS feature limitations.
+- Vision chat accepts image attachments as base64 data URLs or HTTP(S) URLs. `Runtime/ModelImages.cs` decodes them to RGB tensors and owns their lifetime through generation. Text-only models reject image input. VLM uses the supported C Generate entry point with a role-labeled transcript and ordered image markers.
+- The project builds with zero errors and warnings. The check suite covers live delivery before generation completes, SSE framing, cancellation, image input, and the existing workstation workflows. Qwen3-8B on GPU.1 passed 100 checks, including a real HTTP stream with 20 content chunks.
 
 ## Non-negotiable WinForms Designer and event rules
 
@@ -59,34 +63,30 @@ This rule must never be removed, shortened away, or overridden during context up
 
 The project should use straightforward, readable object-oriented C# rather than a giant form containing unrelated loose fields and methods.
 
-Preferred structure:
+Current structure:
 
 ```text
-Models/
-    ModelEnums.cs
-    WorkbenchModel.cs
-    WorkbenchState.cs
-
-Runtime/
-    OpenVinoRuntimeSupport.cs
-
-Workstation/
-    WorkstationMain.cs
-
-Downloads/
-    DownloadsMain.cs
-
-OVMS_Pull/
-    OVMS_PullMain.cs
-
-Convert/
-    ConvertMain.cs
-
-LocalServer/
-    LocalServerMain.cs
-
-Form1.cs
-Form1.Designer.cs
+Form1.cs                       Startup, named events, output, progress, shutdown
+Form1.Designer.cs               Controls and layout
+Workstation/WorkstationTab.cs   Folder selection, device picker, Load Model into OVMS
+Workstation/OvmsServer.cs      Start/watch/stop ovms.exe serving one model
+Chat/ChatTab.cs                Chat tab UI behavior
+Chat/OvmsChat.cs               Streamed chat requests and history
+Workstation/WorkstationInfo.cs  OpenVINO target discovery and multi-GPU settings
+Downloads/DownloadTab.cs        Find/Download UI behavior
+Downloads/ModelDownload.cs      Model URL parsing and Hugging Face file lists
+Downloads/FileDownload.cs       Transfer one file, validate, clean up partials
+OVMS_Pull/OvmsTab.cs            OVMS controls, presets, Preview/Start actions
+OVMS_Pull/OvmsPull.cs           Settings, command scripts, dependency checks
+Runtime/ModelSession.cs        Loaded-model ownership and serialized operations
+Runtime/ChatModel.cs           Cached LLM/VLM generation
+Runtime/OpenVinoRuntime.cs     Bundled native runtime setup
+Models/ModelTypes.cs           Model enums
+Models/ModelFiles.cs           Model file selection and classification
+Common/AppFiles.cs             Config and file paths
+LocalServer/ModelMetadata.cs   Metadata for the loaded model
+LocalModelApiServer.cs         HTTP routes and OpenAI-compatible responses
+Checks/                       Separate command-line regression checks
 ```
 
 Guidelines:
@@ -95,40 +95,29 @@ Guidelines:
 - Use enums for fixed categorical values such as model file kind, run path, status, or capabilities where the value set is truly closed.
 - Do not use enums for dynamic OpenVINO device names such as `GPU.0`, `GPU.1`, `AUTO`, `HETERO:...`, or `MULTI:...`; those remain strings or become a `DeviceInfo` class.
 - Prefer composition over large inheritance trees.
-- The model itself should become a real object instead of a collection of unrelated fields such as `_selectedRuntimeModelPath`, `_loadedRuntimeModelKind`, and `_loadedModelAcceptsText` scattered through `Form1`.
-- `WorkbenchState` should be the authoritative owner of shared application state once introduced.
+- Keep loaded-model properties in `ModelSession`; avoid loose mirror fields in `Form1`.
+- `ModelSession.Loaded` is authoritative for the native resources and model exposed by the server.
 - Do not keep two competing representations of the same state.
 - Pure model/path/classification helpers should move out of `Form1` when they no longer need controls.
-- OpenVINO runtime helpers shared by multiple areas belong in `Runtime/OpenVinoRuntimeSupport.cs` or a similarly focused normal class.
+- OpenVINO runtime helpers shared by multiple areas belong in `Runtime/OpenVinoRuntime.cs` or a similarly focused normal class.
 - UI-only helpers that directly manipulate controls may remain in `Form1` until there is a clean controller boundary.
 - Each extracted tab class should receive the state/services it actually needs; it should not reach through `Form1` for dozens of unrelated controls.
-- Named event handlers stay in `Form1.cs` and should become thin delegates such as `btnCreateBlob_Click -> _convertMain.CreateBlobAsync(...)` once the controller exists.
+- Named event handlers stay in `Form1.cs`; non-UI work belongs in the relevant helper, such as `ModelSession.LoadAsync(...)`.
 
-Refactor order:
-
-1. Common shared enums/data/state classes.
-2. Common pure helpers and shared OpenVINO runtime helpers.
-3. Convert.
-4. OVMS Pull.
-5. Downloads.
-6. Local Server.
-7. Workstation last because it currently owns the most shared/runtime behavior.
-
-The exact order after Common may change if dependencies make another order safer, but Common/state comes first and Workstation should remain late.
+Keep further changes small and driven by actual behavior. Do not add abstraction layers or controller objects solely to move methods. Retain cancellation for user-cancelable downloads and model operations, and error handling at UI, HTTP, and native-runtime boundaries.
 
 ## Plain-language UI rule
 
 - User-facing labels, buttons, status messages, and Help must use ordinary language that a non-developer can understand.
 - Avoid developer-only terms such as `smoke test`, `tensor`, `pipeline`, `runtime entry`, and `inference request` in normal controls or instructions.
-- Prefer familiar actions such as `Send Message`, `Load Model`, `Create Blob`, `Working`, and `Cancel`.
-- The old Tests-tab-specific UI wording is obsolete because the Tests tab no longer exists. Do not reintroduce a Tests tab or Server Tests tab unless the user explicitly asks.
+- Prefer familiar actions such as `Send Message`, `Load Model`, `Working`, and `Cancel`.
 - Before completing a UI change, review every new visible string from the perspective of a first-time user.
 
 ## Project purpose
 
 This project is a C# WinForms OpenVINO workstation/workbench. It is not meant to be a line-by-line translation of the earlier Python project.
 
-The normal Workstation, Convert-to-blob, Downloads, OVMS Pull, and local-server workflows should feel self-contained to the user. Runtime dependencies should be bundled deliberately when practical.
+The normal Workstation, Downloads, OVMS Pull, and local-server workflows should feel self-contained to the user. Runtime dependencies should be bundled deliberately when practical.
 
 OVMS `--pull` export is intentionally different: it depends on the user's installed `C:\Example\OpenVINO\ovms.exe`, the OVMS bundled Python DLL folder, and a known-good global Python export stack. Do not pretend this path is fully standalone. The app should check that stack, explain mismatches plainly, and recommend exact repair commands before starting a non-GGUF pull.
 
@@ -146,7 +135,7 @@ OVMS `--pull` export is intentionally different: it depends on the user's instal
 ## Model types and runtime rules
 
 - Model selection must classify the intended run path from authoritative local model files and layout before loading.
-- Use local files such as `config.json`, `model_index.json`, `generation_config.json`, `tokenizer_config.json`, `processor_config.json`, and `preprocessor_config.json`, plus OpenVINO file layout, to distinguish text generation, vision-language, text-to-image, image-to-image, image classification, object detection, speech, embeddings, generic Core IR, and compiled blobs.
+- Use local files such as `config.json`, `model_index.json`, `generation_config.json`, `tokenizer_config.json`, `processor_config.json`, and `preprocessor_config.json`, plus OpenVINO file layout, to distinguish text generation, vision-language, text-to-image, image-to-image, image classification, object detection, speech, embeddings, and generic Core IR.
 - Do not send image-generation or other non-chat models through the chat LLM loader merely because an XML file exists.
 - The installed OpenVINO GenAI C runtime exports VLM `generate`, `start_chat`, and `finish_chat`, but not `ov_genai_vlm_pipeline_generate_with_history`.
 - VLM text/image paths must call `VLMPipeline.Generate(...)`, not `VLMPipeline.GenerateWithHistory(...)`, unless a future runtime update is verified to export the history function.
@@ -278,7 +267,7 @@ Although Hugging Face may label these models as image-text-to-text, the working 
 
 ### Current OVMS Pull behavior
 
-- The old Optimum Intel tab is removed.
+- OVMS defaults and presets are loaded from `ovms-settings.json`, which is copied into build and publish output.
 - `WorkStationC#.csproj` no longer packages `Runtime\optimum-exporter`.
 - OVMS Pull opens a real `cmd.exe` window and runs a generated `.cmd` script.
 - The generated script prepends `C:\Example\OpenVINO\python` so OVMS finds its Python 3.12 DLL.
@@ -287,25 +276,15 @@ Although Hugging Face may label these models as image-text-to-text, the working 
 - `Start Pull` runs the stack check before opening the conversion CMD window for non-GGUF exports.
 - `Source type` is a dropdown. `HF export` uses `--pipeline_type` and `--weight-format`. `GGUF` uses `--gguf_filename`.
 - GGUF direct pull does not use Optimum/Transformers export packages, so the app skips global `optimum-cli` checks for GGUF mode.
-- Future source workflows for `.onnx`, `.pt`, `.bin`, `.gguf`, TensorFlow SavedModel/`.pb`, and Paddle `.pdmodel`/`.pdiparams` belong in OVMS Pull or a separate source-converter path, not in the Convert tab.
+- Future source workflows for `.onnx`, `.pt`, `.bin`, `.gguf`, TensorFlow SavedModel/`.pb`, and Paddle `.pdmodel`/`.pdiparams` belong in OVMS Pull or a separate import path.
 
-## Model storage and compiled blob rules
+## Model storage rules
 
 - The configured main model folder must contain model folders only.
-- Do not create app-owned root helper folders such as `downloads`, `direct`, `local`, `converted`, `compiled-cache`, or `results` inside the main model folder.
 - Downloads, including direct web-file downloads, use `MainModelFolder\<model-name>\main\...`.
-- App bookkeeping such as `workbench.cfg` and local-model index files belongs beside the app/project, not inside the main model folder.
-- The Convert tab is the only app-owned place that should create/export new OpenVINO compiled `.blob` files.
-- Workstation may import and run existing compiled `.blob` files but must not auto-create compiled-cache blobs.
-- Keep compiled blobs with the specific model they belong to; do not create root-level blob cache folders.
-- New Convert exports create `MainModelFolder\<model-name>\<target>\model.blob` beside the model's `main` folder.
-- Convert is `OpenVINO IR to blob`, not GGUF conversion.
-- The visible Convert tab should list existing OpenVINO `.xml/.bin` entries from the model root, include Refresh Models, keep `.blob` selected, and use one `Create Blob` action.
-- Convert must not download GGUF, list GGUF as a conversion source, move GGUF files, or convert GGUF to `.xml/.bin`.
+- App bookkeeping such as `workbench.cfg` belongs beside the app/project, not inside the main model folder.
 - GGUF pulls belong on OVMS Pull with a Hugging Face repo plus a separate `--gguf_filename`.
 - Native OpenVINO IR text-model downloads must keep tokenizer/detokenizer files beside the model when provided.
-- When `.blob` is selected, Convert uses the Workstation tab's selected `Models target:` value.
-- `.onnx`, `.pb`, `.caffemodel`, `.tflite`, `.pdmodel`, `.safetensors`, PyTorch checkpoints, support files, TensorRT engines, and training/data formats are not part of the simplified Convert tab.
 - The old Load Model local-library UI and old Optimum Intel tab are removed. Do not bring either back unless the user explicitly asks.
 
 ## Downloads rules
@@ -314,20 +293,18 @@ Although Hugging Face may label these models as image-text-to-text, the working 
 - The user can paste a Hugging Face model page, tree page, or file page and click Download.
 - Hugging Face downloads go under `MainModelFolder\<model-name>\main\...` so Workstation can select the model folder and inspect its `main` contents.
 - The Downloads tab has a Find button that validates the pasted Web Address before downloading.
-- The Downloads tab has twelve programmable saved-address buttons. Clicking one fills the Web Address box inside the app; it must not open the default browser.
-- Saved addresses are stored with one Save Address action using Web Address, Button Label, and Save To slot.
-- The main model folder and favorite website labels/URLs are persisted in `workbench.cfg` beside the project/app config.
+- The main model folder is saved in `workbench.cfg`. Updating it preserves unrelated existing config lines.
 - `model-root.txt` is legacy and must not be recreated as the active config file.
 - Interrupted model downloads must be restart-friendly: if the authoritative remote size matches the local size, skip the existing complete file and continue with missing/mismatched files. `.partial` files are not complete downloads.
 
 ## Local model API server
 
-The built-in local server is an OpenAI-compatible local API that reuses the Workstation's loaded model state. It is no longer represented by a Server Tests tab.
+The built-in local server is an OpenAI-compatible local API that reuses the Workstation's loaded model state.
 
 Current server rules:
 
-- Bind to loopback only: `127.0.0.1` / `localhost` on port `11434`.
-- Base URL: `http://localhost:11434`.
+- Bind to loopback only: `127.0.0.1` / `localhost` on port `8000`.
+- Base URL: `http://localhost:8000`.
 - Do not restore the previous `0.0.0.0`, LAN-discovery, or `192.168.0.11` behavior unless the user explicitly asks to expose the server beyond the local machine.
 - Workstation owns Start Local Server / Stop Local Server, local server address, and status.
 - Reuse the loaded Workstation model state; do not create a separate server-only model picker unless the user explicitly asks.
@@ -337,18 +314,19 @@ Current API surface:
 
 - `GET /`
 - `GET /health`
-- `GET /v1/models`
-- `POST /v1/chat/completions`
-- `POST /v1/completions`
+- `GET /v3/models` and `GET /v1/models`
+- `GET /v3/models/{model}` and `GET /v1/models/{model}`
+- `POST /v3/chat/completions` and `POST /v1/chat/completions`
+- `POST /v3/completions` and `POST /v1/completions`
 - `POST /v1/images/generations` returns clear not-implemented JSON (HTTP 501).
 - `POST /v1/images/edits` returns clear not-implemented JSON (HTTP 501).
 
 Server behavior:
 
-- `/v1/models` reports known models/current loaded model as supported by the current implementation.
+- `/v1/models` reports the single loaded model, or an empty list. A request for a different model returns 404; the user loads another model on Workstation.
 - `/v1/chat/completions` and `/v1/completions` use the loaded Workstation text model for supported OpenVINO GenAI/GGUF paths.
 - The server does not execute tools. Extra OpenAI-style fields may be accepted/ignored for compatibility, but do not inject tool schemas into prompts or invent structured tool calls until real tool execution exists.
-- Streaming, where supported by the compatibility layer, may be produced after the existing model-generation path completes; do not redesign streaming during the current structural refactor.
+- Streaming sends native output immediately, before generation completes. Preserve explicit flushes, cancellation, error handling, and the tests that prove live delivery. This was explicitly requested after the structural refactor.
 - Use plain Output messages that explain whether the server is stopped, running, missing a loaded model, or receiving an unsupported request.
 - Do not expose the server to the internet unless the user explicitly asks and the risks are discussed.
 
@@ -360,7 +338,6 @@ Server behavior:
 - If a change creates a large cross-project error cascade, revert that change rather than stacking more patches on top.
 - Preserve working runtime behavior while changing structure.
 - Do not change OpenVINO device-selection semantics, model-classification semantics, download paths, conversion output paths, or server protocol behavior merely because code is being moved.
-- Do not delete the excluded `Tests` or `ServerTests` folders until the refactor is stable and the user explicitly approves deletion.
 
 ## What not to do
 
@@ -371,7 +348,6 @@ Server behavior:
 - Do not make app/runtime code depend on `/Extras`.
 - Do not assume a model supports image input; inspect model capability first.
 - Do not use hidden runtime patches to fix Designer mistakes; fix `Form1.Designer.cs`.
-- Do not reintroduce Tests or Server Tests tabs during cleanup.
 - Do not use extra partial `Form1` files as a way to make `Form1.cs` look smaller.
 
 ## Communication style

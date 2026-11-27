@@ -12,22 +12,21 @@
   <ItemGroup>
     <Compile Remove="OpenVINO.CSharp.API\**\*.cs" />
     <Compile Remove="Extras\**\*.cs" />
-    <Compile Remove="ServerTests\**" />
-    <Compile Remove="Tests\**" />
+    <Compile Remove="Checks\**" />
     <Compile Remove="_buildcheck\**\*.cs" />
     <EmbeddedResource Remove="OpenVINO.CSharp.API\**\*" />
     <EmbeddedResource Remove="Extras\**\*" />
-    <EmbeddedResource Remove="ServerTests\**" />
-    <EmbeddedResource Remove="Tests\**" />
+    <EmbeddedResource Remove="Checks\**" />
     <EmbeddedResource Remove="_buildcheck\**\*" />
     <None Remove="OpenVINO.CSharp.API\**\*" />
     <None Remove="Extras\**\*" />
-    <None Remove="ServerTests\**" />
-    <None Remove="Tests\**" />
+    <None Remove="Checks\**" />
     <None Remove="_buildcheck\**\*" />
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <InternalsVisibleTo Include="WorkstationChecks" />
     <ProjectReference Include="OpenVINO.CSharp.API\OpenVINO.CSharp.API.csproj" />
     <PackageReference Include="OpenVINO.runtime.win" Version="2026.3.0" />
     <PackageReference Include="JYPPX.OpenVINO.GenAI.runtime.win" Version="2026.3.0" />
@@ -47,10 +46,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Samples\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
+    <None Update="ovms-settings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="SearchApiKeys.txt" Condition="Exists('SearchApiKeys.txt')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>

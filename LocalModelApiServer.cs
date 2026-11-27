@@ -1,3 +1,9 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -9,8 +15,9 @@ namespace WorkStationC_;
 
 internal sealed class LocalModelApiServer : IDisposable
 {
+    private WebApplication? _application;
     private const int MaxHeaderSizeBytes = 65_536;
-    private const int MaxRequestBodyBytes = 4_194_304;
+    internal const int MaxRequestBodyBytes = 33_554_432;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -20,10 +27,6 @@ internal sealed class LocalModelApiServer : IDisposable
     private readonly Func<LocalModelApiSnapshot> _snapshotProvider;
     private readonly Func<LocalModelApiTextRequest, CancellationToken, Task<LocalModelApiTextResult>> _textGenerationHandler;
     private readonly Action<string> _log;
-    private readonly object _stateLock = new();
-    private TcpListener? _listener;
-    private CancellationTokenSource? _cancellation;
-    private Task? _listenerTask;
 
     public LocalModelApiServer(
         Func<LocalModelApiSnapshot> snapshotProvider,
@@ -35,42 +38,39 @@ internal sealed class LocalModelApiServer : IDisposable
         _log = log;
     }
 
-    public bool IsRunning
-    {
-        get
-        {
-            lock (_stateLock)
-            {
-                return _listener is not null;
-            }
-        }
-    }
+    public bool IsRunning => _application is not null;
 
     public string BaseUrl { get; private set; } = string.Empty;
+
+    public string ApiBaseUrl => IsRunning ? $"{BaseUrl}/v3" : string.Empty;
 
     public DateTimeOffset? StartedAtUtc { get; private set; }
 
     public void Start(IPAddress bindAddress, int port, string advertisedHost = "")
     {
-        lock (_stateLock)
+        if (IsRunning) return;
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory });
+        builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options =>
         {
-            if (_listener is not null)
-            {
-                return;
-            }
-
-            TcpListener listener = new(bindAddress, port);
-            listener.Start();
-
-            CancellationTokenSource cancellation = new();
-            _listener = listener;
-            _cancellation = cancellation;
-            string hostForUrl = string.IsNullOrWhiteSpace(advertisedHost)
-                ? FormatHostForUrl(bindAddress)
-                : FormatHostForUrl(advertisedHost.Trim());
-            BaseUrl = $"http://{hostForUrl}:{port.ToString(CultureInfo.InvariantCulture)}";
+            options.Listen(bindAddress, port);
+            options.Limits.MaxRequestHeadersTotalSize = MaxHeaderSizeBytes;
+            options.Limits.MaxRequestBodySize = MaxRequestBodyBytes;
+        });
+        WebApplication application = builder.Build();
+        application.Run(HandleRequestAsync);
+        try
+        {
+            application.StartAsync().GetAwaiter().GetResult();
+            _application = application;
+            string host = string.IsNullOrWhiteSpace(advertisedHost) ? FormatHostForUrl(bindAddress) : FormatHostForUrl(advertisedHost.Trim());
+            BaseUrl = $"http://{host}:{port}";
             StartedAtUtc = DateTimeOffset.UtcNow;
-            _listenerTask = Task.Run(() => ListenAsync(listener, cancellation.Token));
+        }
+        catch
+        {
+            application.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw;
         }
     }
 
@@ -90,161 +90,71 @@ internal sealed class LocalModelApiServer : IDisposable
 
     public async Task StopAsync()
     {
-        TcpListener? listener;
-        CancellationTokenSource? cancellation;
-        Task? listenerTask;
-
-        lock (_stateLock)
-        {
-            listener = _listener;
-            cancellation = _cancellation;
-            listenerTask = _listenerTask;
-            _listener = null;
-            _cancellation = null;
-            _listenerTask = null;
-        }
-
-        if (listener is null)
-        {
-            BaseUrl = string.Empty;
-            StartedAtUtc = null;
-            return;
-        }
-
-        cancellation?.Cancel();
-        listener.Stop();
-
-        if (listenerTask is not null)
-        {
-            try
-            {
-                await listenerTask.WaitAsync(TimeSpan.FromSeconds(2));
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-            catch (SocketException)
-            {
-            }
-            catch (TimeoutException)
-            {
-                _log("OpenAI-compatible local server did not stop within 2 seconds.");
-            }
-        }
-
-        cancellation?.Dispose();
+        WebApplication? application = _application;
+        _application = null;
         BaseUrl = string.Empty;
         StartedAtUtc = null;
+        if (application is null) return;
+        application.Lifetime.StopApplication();
+        try
+        {
+            await application.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _log("Local server shutdown timed out.");
+        }
+        finally
+        {
+            await application.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     public void Dispose()
     {
-        TcpListener? listener;
-        CancellationTokenSource? cancellation;
-
-        lock (_stateLock)
-        {
-            listener = _listener;
-            cancellation = _cancellation;
-            _listener = null;
-            _cancellation = null;
-            _listenerTask = null;
-        }
-
-        cancellation?.Cancel();
-        listener?.Stop();
-        cancellation?.Dispose();
+        // Start shutdown immediately without blocking the UI thread needed by active requests.
+        _ = StopAsync();
     }
 
-    private async Task ListenAsync(TcpListener listener, CancellationToken cancellationToken)
+    private async Task HandleRequestAsync(HttpContext context)
     {
+        context.Response.Headers.AccessControlAllowOrigin = "*";
+        context.Response.Headers.AccessControlAllowMethods = "GET, POST, OPTIONS";
+        context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization, x-requested-with, openai-organization, openai-project";
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            context.RequestAborted, context.RequestServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                TcpClient client = await listener.AcceptTcpClientAsync(cancellationToken);
-                _ = Task.Run(() => HandleClientSafelyAsync(client, cancellationToken), CancellationToken.None);
-            }
+            using StreamReader reader = new(context.Request.Body, Encoding.UTF8);
+            string body = await reader.ReadToEndAsync(cancellation.Token);
+            await DispatchRouteAsync(context.Response, context.Request.Method,
+                context.Request.Path.Value ?? "/", body, cancellation.Token);
         }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (SocketException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            _log($"OpenAI-compatible local server stopped because of an error: {ex.Message}");
+            _log($"Local server request failed: {ex.Message}");
+            if (context.Response.HasStarted) context.Abort();
+            else await WriteOpenAiErrorAsync(context.Response,
+                ex is BadHttpRequestException badRequest ? badRequest.StatusCode : 500,
+                ex.Message, "server_error", context.RequestAborted);
         }
-    }
-
-    private async Task HandleClientSafelyAsync(TcpClient client, CancellationToken serverCancellation)
-    {
-        using (client)
-        {
-            try
-            {
-                await HandleClientAsync(client, serverCancellation);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (IOException ex)
-            {
-                _log($"OpenAI-compatible local server request failed: {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                _log($"OpenAI-compatible local server request failed: {ex.Message}");
-            }
-        }
-    }
-
-    private async Task HandleClientAsync(TcpClient client, CancellationToken serverCancellation)
-    {
-        client.NoDelay = true;
-        await using NetworkStream stream = client.GetStream();
-
-        HttpRequestReadResult readResult = await ReadHttpRequestAsync(stream, serverCancellation);
-        if (!readResult.Success)
-        {
-            await WriteOpenAiErrorAsync(
-                stream,
-                readResult.StatusCode,
-                readResult.ErrorMessage,
-                readResult.ErrorType,
-                serverCancellation);
-            return;
-        }
-
-        HttpRequestData request = readResult.Request!;
-        await DispatchRouteAsync(
-            stream,
-            request.Method,
-            request.Path,
-            request.Body,
-            serverCancellation);
     }
 
     private async Task DispatchRouteAsync(
-        NetworkStream stream,
+        HttpResponse response,
         string method,
         string path,
         string requestBody,
         CancellationToken serverCancellation)
     {
+        // Use OVMS routes, with /v1 aliases for existing OpenAI clients.
+        if (path.StartsWith("/v1/", StringComparison.Ordinal)) path = "/v3/" + path[4..];
         if (method == "OPTIONS")
         {
             await WriteResponseAsync(
-                stream,
+                response,
                 204,
-                "No Content",
                 "application/json; charset=utf-8",
                 Array.Empty<byte>(),
                 serverCancellation);
@@ -253,42 +163,60 @@ internal sealed class LocalModelApiServer : IDisposable
 
         if (method == "GET" && (path == "/" || path == "/health"))
         {
-            await WriteGeneratedJsonAsync(stream, BuildHealthPayload, serverCancellation);
+            await WriteJsonAsync(response, 200, BuildHealthPayload(), serverCancellation);
             return;
         }
 
-        if (method == "GET" && path == "/v1/models")
+        if (method == "GET" && (path == "/v2/health/live" || path == "/v2/health/ready"))
         {
-            await WriteGeneratedJsonAsync(stream, BuildV1ModelsPayload, serverCancellation);
+            // Server readiness is independent of whether a model is loaded.
+            await WriteResponseAsync(response, 200, "application/json", Array.Empty<byte>(), serverCancellation);
             return;
         }
 
-        if (method == "POST" && path == "/v1/chat/completions")
+        if (method == "GET" && path == "/v3/models")
+        {
+            await WriteJsonAsync(response, 200, BuildModelsPayload(), serverCancellation);
+            return;
+        }
+
+        if (method == "GET" && path.StartsWith("/v3/models/", StringComparison.Ordinal))
+        {
+            string name = Uri.UnescapeDataString(path[11..]);
+            var model = _snapshotProvider().Models.FirstOrDefault(model => model.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (model is null)
+                await WriteOpenAiErrorAsync(response, 404, "The requested model is not loaded.", "model_not_found", serverCancellation);
+            else
+                await WriteJsonAsync(response, 200, new { id = model.Name, @object = "model", created = model.ModifiedAtUtc.ToUnixTimeSeconds(), owned_by = "OpenVINO Workbench" }, serverCancellation);
+            return;
+        }
+
+        if (method == "POST" && path == "/v3/chat/completions")
         {
             await HandleTextGenerationAsync(
-                stream,
+                response,
                 requestBody,
                 LocalModelApiTextResponseKind.Chat,
                 serverCancellation);
             return;
         }
 
-        if (method == "POST" && path == "/v1/completions")
+        if (method == "POST" && path == "/v3/completions")
         {
             await HandleTextGenerationAsync(
-                stream,
+                response,
                 requestBody,
                 LocalModelApiTextResponseKind.Text,
                 serverCancellation);
             return;
         }
 
-        if (method == "POST" && (path == "/v1/images/generations" || path == "/v1/images/edits"))
+        if (method == "POST" && (path == "/v3/images/generations" || path == "/v3/images/edits"))
         {
             await WriteOpenAiErrorAsync(
-                stream,
+                response,
                 501,
-                "Image generation over this local server is not implemented yet. Use Run Image Test in the app for loaded image-capable models.",
+                "Image generation is not available through this local server.",
                 "not_implemented",
                 serverCancellation);
             return;
@@ -297,7 +225,7 @@ internal sealed class LocalModelApiServer : IDisposable
         if (method is not ("GET" or "POST"))
         {
             await WriteOpenAiErrorAsync(
-                stream,
+                response,
                 405,
                 "Method not allowed.",
                 "invalid_request_error",
@@ -306,7 +234,7 @@ internal sealed class LocalModelApiServer : IDisposable
         }
 
         await WriteOpenAiErrorAsync(
-            stream,
+            response,
             404,
             $"Endpoint not found: {path}",
             "invalid_request_error",
@@ -314,7 +242,7 @@ internal sealed class LocalModelApiServer : IDisposable
     }
 
     private async Task HandleTextGenerationAsync(
-        NetworkStream stream,
+        HttpResponse response,
         string requestBody,
         LocalModelApiTextResponseKind responseKind,
         CancellationToken cancellationToken)
@@ -325,16 +253,22 @@ internal sealed class LocalModelApiServer : IDisposable
                 out LocalModelApiTextRequest? request,
                 out object? errorPayload))
         {
-            await WriteJsonAsync(stream, 400, errorPayload!, cancellationToken);
+            await WriteJsonAsync(response, 400, errorPayload!, cancellationToken);
             return;
         }
 
         LocalModelApiTextRequest textRequest = request!;
-        LocalModelApiTextResult result = await _textGenerationHandler(textRequest, cancellationToken);
+        if (textRequest.Stream)
+        {
+            await WriteTextGenerationStreamAsync(response, responseKind, textRequest, cancellationToken);
+            return;
+        }
+
+        LocalModelApiTextResult result = CompleteToolResponse(textRequest, await _textGenerationHandler(textRequest, cancellationToken));
         if (!result.Success)
         {
             await WriteOpenAiErrorAsync(
-                stream,
+                response,
                 result.StatusCode,
                 result.ErrorMessage,
                 string.IsNullOrWhiteSpace(result.ErrorType) ? "server_error" : result.ErrorType,
@@ -342,21 +276,10 @@ internal sealed class LocalModelApiServer : IDisposable
             return;
         }
 
-        if (textRequest.Stream)
-        {
-            await WriteTextGenerationStreamAsync(
-                stream,
-                responseKind,
-                textRequest,
-                result,
-                cancellationToken);
-            return;
-        }
-
         object payload = responseKind == LocalModelApiTextResponseKind.Chat
             ? BuildChatCompletionPayload(textRequest, result)
             : BuildTextCompletionPayload(textRequest, result);
-        await WriteJsonAsync(stream, 200, payload, cancellationToken);
+        await WriteJsonAsync(response, 200, payload, cancellationToken);
     }
 
     private static object BuildChatCompletionPayload(
@@ -369,6 +292,11 @@ internal sealed class LocalModelApiServer : IDisposable
             ["role"] = "assistant",
             ["content"] = result.Text,
         };
+        if (result.ToolCalls.Count > 0)
+        {
+            message["tool_calls"] = result.ToolCalls.Select(call => call.ToPayload()).ToArray();
+            if (string.IsNullOrWhiteSpace(result.Text)) message["content"] = null;
+        }
 
         return new Dictionary<string, object?>
         {
@@ -382,14 +310,14 @@ internal sealed class LocalModelApiServer : IDisposable
                 {
                     ["index"] = 0,
                     ["message"] = message,
-                    ["finish_reason"] = "stop",
+                    ["finish_reason"] = result.FinishReason,
                 },
             },
             ["usage"] = new Dictionary<string, object?>
             {
-                ["prompt_tokens"] = 0,
-                ["completion_tokens"] = 0,
-                ["total_tokens"] = 0,
+                ["prompt_tokens"] = result.PromptTokens,
+                ["completion_tokens"] = result.CompletionTokens,
+                ["total_tokens"] = result.PromptTokens + result.CompletionTokens,
             },
             ["workstation"] = new Dictionary<string, object?>
             {
@@ -416,14 +344,14 @@ internal sealed class LocalModelApiServer : IDisposable
                 {
                     index = 0,
                     text = result.Text,
-                    finish_reason = "stop",
+                    finish_reason = result.FinishReason,
                 },
             },
             usage = new
             {
-                prompt_tokens = 0,
-                completion_tokens = 0,
-                total_tokens = 0,
+                prompt_tokens = result.PromptTokens,
+                completion_tokens = result.CompletionTokens,
+                total_tokens = result.PromptTokens + result.CompletionTokens,
             },
             workstation = new
             {
@@ -433,122 +361,117 @@ internal sealed class LocalModelApiServer : IDisposable
         };
     }
 
-    private static async Task WriteTextGenerationStreamAsync(
-        NetworkStream stream,
+    private async Task WriteTextGenerationStreamAsync(
+        HttpResponse response,
         LocalModelApiTextResponseKind responseKind,
         LocalModelApiTextRequest request,
-        LocalModelApiTextResult result,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<object> payloads = responseKind == LocalModelApiTextResponseKind.Chat
-            ? BuildChatStreamPayloads(request, result)
-            : BuildTextStreamPayloads(request, result);
-        await WriteEventStreamAsync(stream, payloads, cancellationToken);
-    }
-
-    private static IReadOnlyList<object> BuildChatStreamPayloads(
-        LocalModelApiTextRequest request,
-        LocalModelApiTextResult result)
-    {
-        string id = $"chatcmpl-{Guid.NewGuid():N}";
+        string id = $"{(responseKind == LocalModelApiTextResponseKind.Chat ? "chatcmpl" : "cmpl")}-{Guid.NewGuid():N}";
         long created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        string model = string.IsNullOrWhiteSpace(result.ModelName) ? request.Model : result.ModelName;
-        List<object> payloads = new();
+        string model = string.IsNullOrWhiteSpace(request.Model) ? _snapshotProvider().LoadedModelName : request.Model;
+        bool started = false;
 
-        payloads.Add(BuildChatChunk(
-            id,
-            created,
-            model,
-            new Dictionary<string, object?> { ["role"] = "assistant" },
-            null));
-
-        if (!string.IsNullOrEmpty(result.Text))
+        Dictionary<string, object?> Chunk(string text, string? finishReason, bool role = false, object? toolCalls = null)
         {
-            payloads.Add(BuildChatChunk(
-                id,
-                created,
-                model,
-                new Dictionary<string, object?> { ["content"] = result.Text },
-                null));
+            Dictionary<string, object?> choice = new() { ["index"] = 0, ["finish_reason"] = finishReason };
+            if (responseKind == LocalModelApiTextResponseKind.Chat)
+                choice["delta"] = role ? new Dictionary<string, object?> { ["role"] = "assistant", ["content"] = "" }
+                    : finishReason is null ? new Dictionary<string, object?> { ["content"] = text }
+                    : new Dictionary<string, object?>();
+            else
+            {
+                choice["text"] = text;
+                choice["logprobs"] = null;
+            }
+            if (toolCalls is not null) choice["delta"] = new { tool_calls = toolCalls };
+            Dictionary<string, object?> chunk = new()
+            {
+                ["id"] = id, ["created"] = created, ["model"] = model,
+                ["object"] = responseKind == LocalModelApiTextResponseKind.Chat ? "chat.completion.chunk" : "text_completion",
+                ["choices"] = new[] { choice },
+            };
+            if (request.IncludeUsage) chunk["usage"] = null;
+            return chunk;
         }
 
-        payloads.Add(BuildChatChunk(
-            id,
-            created,
-            model,
-            new Dictionary<string, object?>(),
-            "stop"));
-        return payloads;
+        async ValueTask StartStreamAsync()
+        {
+            if (started) return;
+            response.ContentType = "text/event-stream; charset=utf-8";
+            response.Headers.CacheControl = "no-cache";
+            response.Headers["X-Accel-Buffering"] = "no";
+            response.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            started = true;
+            if (responseKind == LocalModelApiTextResponseKind.Chat)
+                await WriteEventAsync(response, Chunk("", null, role: true), cancellationToken).ConfigureAwait(false);
+        }
+
+        request.OnTextChunk = async text =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            // Tool-enabled turns are parsed as a whole so partial JSON/XML is never exposed as a call.
+            if (request.ToolCalling.Enabled) return;
+            if (text.Length == 0) return;
+            await StartStreamAsync().ConfigureAwait(false);
+            await WriteEventAsync(response, Chunk(text, null), cancellationToken).ConfigureAwait(false);
+        };
+        try
+        {
+            // The handler awaits each write while generation is running, preserving order and
+            // applying backpressure instead of accumulating the whole answer in an HTTP buffer.
+            var result = CompleteToolResponse(request, await _textGenerationHandler(request, cancellationToken).ConfigureAwait(false));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!result.Success)
+            {
+                if (started) throw new InvalidOperationException(result.ErrorMessage);
+                await WriteOpenAiErrorAsync(response, result.StatusCode, result.ErrorMessage,
+                    string.IsNullOrWhiteSpace(result.ErrorType) ? "server_error" : result.ErrorType, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (!started)
+            {
+                if (!string.IsNullOrWhiteSpace(result.ModelName)) model = result.ModelName;
+                await StartStreamAsync().ConfigureAwait(false);
+                if (result.Text.Length > 0)
+                    await WriteEventAsync(response, Chunk(result.Text, null), cancellationToken).ConfigureAwait(false);
+            }
+            if (result.ToolCalls.Count > 0)
+                await WriteEventAsync(response, Chunk("", null, toolCalls: result.ToolCalls.Select((call, index) => call.ToPayload(index)).ToArray()), cancellationToken).ConfigureAwait(false);
+            await WriteEventAsync(response, Chunk("", result.FinishReason), cancellationToken).ConfigureAwait(false);
+            if (request.IncludeUsage)
+            {
+                var usage = Chunk("", null);
+                usage["choices"] = Array.Empty<object>();
+                usage["usage"] = new { prompt_tokens = result.PromptTokens, completion_tokens = result.CompletionTokens,
+                    total_tokens = result.PromptTokens + result.CompletionTokens };
+                await WriteEventAsync(response, usage, cancellationToken).ConfigureAwait(false);
+            }
+            await response.WriteAsync("data: [DONE]\n\n", cancellationToken).ConfigureAwait(false);
+            await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { request.OnTextChunk = null; }
     }
 
-    private static object BuildChatChunk(
-        string id,
-        long created,
-        string model,
-        Dictionary<string, object?> delta,
-        string? finishReason)
+    private static async Task WriteEventAsync(HttpResponse response, object payload, CancellationToken cancellationToken)
     {
-        return new Dictionary<string, object?>
-        {
-            ["id"] = id,
-            ["object"] = "chat.completion.chunk",
-            ["created"] = created,
-            ["model"] = model,
-            ["choices"] = new object[]
-            {
-                new Dictionary<string, object?>
-                {
-                    ["index"] = 0,
-                    ["delta"] = delta,
-                    ["finish_reason"] = finishReason,
-                },
-            },
-        };
+        await response.WriteAsync($"data: {JsonSerializer.Serialize(payload, JsonOptions)}\n\n", cancellationToken).ConfigureAwait(false);
+        await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static IReadOnlyList<object> BuildTextStreamPayloads(
-        LocalModelApiTextRequest request,
-        LocalModelApiTextResult result)
+    private static LocalModelApiTextResult CompleteToolResponse(LocalModelApiTextRequest request, LocalModelApiTextResult result)
     {
-        string id = $"cmpl-{Guid.NewGuid():N}";
-        long created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        string model = string.IsNullOrWhiteSpace(result.ModelName) ? request.Model : result.ModelName;
-
-        return new object[]
+        if (!result.Success || !request.ToolCalling.Enabled) return result;
+        try
         {
-            new Dictionary<string, object?>
-            {
-                ["id"] = id,
-                ["object"] = "text_completion",
-                ["created"] = created,
-                ["model"] = model,
-                ["choices"] = new object[]
-                {
-                    new Dictionary<string, object?>
-                    {
-                        ["index"] = 0,
-                        ["text"] = result.Text,
-                        ["finish_reason"] = null,
-                    },
-                },
-            },
-            new Dictionary<string, object?>
-            {
-                ["id"] = id,
-                ["object"] = "text_completion",
-                ["created"] = created,
-                ["model"] = model,
-                ["choices"] = new object[]
-                {
-                    new Dictionary<string, object?>
-                    {
-                        ["index"] = 0,
-                        ["text"] = string.Empty,
-                        ["finish_reason"] = "stop",
-                    },
-                },
-            },
-        };
+            var reply = request.ToolCalling.Parse(result.Text);
+            return LocalModelApiTextResult.Ok(reply.Content, result.ModelName, result.LoadMilliseconds, result.GenerateMilliseconds,
+                result.PromptTokens, result.CompletionTokens, reply.Calls.Count > 0 ? "tool_calls" : result.FinishReason, reply.Calls);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        {
+            return LocalModelApiTextResult.Error(502, ex.Message, "tool_call_error");
+        }
     }
 
     private static bool TryParseTextRequest(
@@ -575,8 +498,9 @@ internal sealed class LocalModelApiServer : IDisposable
                 return false;
             }
 
+            List<string> imageUrls = [];
             string prompt = responseKind == LocalModelApiTextResponseKind.Chat
-                ? ReadChatPrompt(root)
+                ? ReadChatPrompt(root, imageUrls)
                 : ReadTextPrompt(root);
             if (string.IsNullOrWhiteSpace(prompt))
             {
@@ -586,20 +510,43 @@ internal sealed class LocalModelApiServer : IDisposable
                 return false;
             }
 
-            int requestedMaxTokens = TryReadFirstInt(root, "max_completion_tokens", "max_tokens") ?? 64;
+            int requestedMaxTokens = TryReadFirstInt(root, "max_completion_tokens", "max_tokens") ?? 2048;
+            double temperature = TryReadDouble(root, "temperature") ?? 0.2;
+            if (requestedMaxTokens <= 0 || !double.IsFinite(temperature) || temperature < 0 || temperature > 2)
+            {
+                errorPayload = BuildBadRequestError("max_tokens must be positive and temperature must be between 0 and 2.");
+                return false;
+            }
             request = new LocalModelApiTextRequest
             {
                 ResponseKind = responseKind,
                 Model = TryReadString(root, "model"),
                 Prompt = prompt,
-                MaxTokens = requestedMaxTokens > 0 ? Math.Min(requestedMaxTokens, 2048) : 64,
-                Temperature = TryReadDouble(root, "temperature") ?? 0.2,
+                ImageUrls = imageUrls,
+                Messages = responseKind == LocalModelApiTextResponseKind.Chat
+                    ? root.GetProperty("messages").EnumerateArray().Where(m => m.ValueKind == JsonValueKind.Object)
+                        .Select(m =>
+                        {
+                            var message = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(m.GetRawText())!;
+                            message["content"] = JsonSerializer.SerializeToElement(ReadMessageContent(m));
+                            return JsonSerializer.Serialize(message);
+                        }).ToArray() : [],
+                MaxTokens = requestedMaxTokens,
+                Temperature = temperature,
                 Stream = TryReadBool(root, "stream") ?? false,
+                IncludeUsage = root.TryGetProperty("stream_options", out var options) && options.ValueKind == JsonValueKind.Object
+                    && TryReadBool(options, "include_usage") == true,
                 ResponseFormat = ReadResponseFormat(root),
-                EnableThinking = TryReadBool(root, "enable_thinking") ?? false,
-                PreserveThinking = TryReadBool(root, "preserve_thinking") ?? false,
+                ToolCalling = responseKind == LocalModelApiTextResponseKind.Chat ? ToolCalling.FromRequest(root) : ToolCalling.Disabled,
+                EnableThinking = ReadTemplateBool(root, "enable_thinking"),
+                PreserveThinking = ReadTemplateBool(root, "preserve_thinking"),
             };
             return true;
+        }
+        catch (InvalidDataException ex)
+        {
+            errorPayload = BuildBadRequestError(ex.Message);
+            return false;
         }
         catch (JsonException ex)
         {
@@ -622,7 +569,11 @@ internal sealed class LocalModelApiServer : IDisposable
         };
     }
 
-    private static string ReadChatPrompt(JsonElement root)
+    private static bool ReadTemplateBool(JsonElement root, string name) =>
+        (root.TryGetProperty("chat_template_kwargs", out var kwargs) && kwargs.ValueKind == JsonValueKind.Object
+            ? TryReadBool(kwargs, name) : null) ?? TryReadBool(root, name) ?? false;
+
+    private static string ReadChatPrompt(JsonElement root, List<string> imageUrls)
     {
         if (!root.TryGetProperty("messages", out JsonElement messages)
             || messages.ValueKind != JsonValueKind.Array
@@ -641,7 +592,7 @@ internal sealed class LocalModelApiServer : IDisposable
                 continue;
             }
 
-            string? formatted = FormatChatMessageLine(message, singleMessage);
+            string? formatted = FormatChatMessageLine(message, singleMessage, imageUrls);
             if (!string.IsNullOrWhiteSpace(formatted))
             {
                 lines.Add(formatted);
@@ -651,9 +602,9 @@ internal sealed class LocalModelApiServer : IDisposable
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string? FormatChatMessageLine(JsonElement message, bool isSingleMessage)
+    private static string? FormatChatMessageLine(JsonElement message, bool isSingleMessage, List<string> imageUrls)
     {
-        string content = ReadMessageContent(message);
+        string content = ReadMessageContent(message, imageUrls);
         string role = TryReadString(message, "role");
         string toolCalls = ReadMessageToolCalls(message);
         string toolCallId = TryReadString(message, "tool_call_id");
@@ -668,7 +619,7 @@ internal sealed class LocalModelApiServer : IDisposable
             string label = string.IsNullOrWhiteSpace(toolCallId)
                 ? "tool result"
                 : $"tool result {toolCallId}";
-            return $"{label}: {content.Trim()}";
+            return $"{label}: <tool_response>\n{content}\n</tool_response>";
         }
 
         if (string.IsNullOrWhiteSpace(role) || isSingleMessage)
@@ -710,7 +661,7 @@ internal sealed class LocalModelApiServer : IDisposable
         return string.Empty;
     }
 
-    private static string ReadMessageContent(JsonElement message)
+    private static string ReadMessageContent(JsonElement message, List<string>? imageUrls = null)
     {
         if (!message.TryGetProperty("content", out JsonElement content))
         {
@@ -730,6 +681,17 @@ internal sealed class LocalModelApiServer : IDisposable
         List<string> parts = new();
         foreach (JsonElement part in content.EnumerateArray())
         {
+            if (part.ValueKind == JsonValueKind.Object && TryReadString(part, "type") == "image_url" && imageUrls is not null)
+            {
+                if (!part.TryGetProperty("image_url", out var image) || image.ValueKind != JsonValueKind.Object
+                    || string.IsNullOrWhiteSpace(TryReadString(image, "url")))
+                    throw new InvalidDataException("Each image_url must contain a nonempty url.");
+                if (imageUrls.Count >= ModelImages.MaxImages)
+                    throw new InvalidDataException($"A request supports at most {ModelImages.MaxImages} images.");
+                parts.Add($"<ov_genai_image_{imageUrls.Count}>");
+                imageUrls.Add(TryReadString(image, "url"));
+                continue;
+            }
             if (part.ValueKind == JsonValueKind.String)
             {
                 parts.Add(part.GetString() ?? string.Empty);
@@ -791,7 +753,9 @@ internal sealed class LocalModelApiServer : IDisposable
                 string label = string.IsNullOrWhiteSpace(id)
                     ? "assistant tool call"
                     : $"assistant tool call {id}";
-                lines.Add($"{label}: {name} {arguments}");
+                using var argumentDocument = JsonDocument.Parse(arguments);
+                string call = JsonSerializer.Serialize(new { name, arguments = argumentDocument.RootElement });
+                lines.Add($"{label}: <tool_call>{call}</tool_call>");
             }
         }
 
@@ -925,6 +889,7 @@ internal sealed class LocalModelApiServer : IDisposable
             protocol = "OpenAI-compatible",
             local_only = true,
             base_url = BaseUrl,
+            api_base_url = ApiBaseUrl,
             started_at = StartedAtUtc.HasValue
                 ? StartedAtUtc.Value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
                 : string.Empty,
@@ -932,17 +897,18 @@ internal sealed class LocalModelApiServer : IDisposable
             model_loaded = snapshot.ModelLoaded,
             endpoints = new[]
             {
-                "/health",
-                "/v1/models",
-                "/v1/chat/completions",
-                "/v1/completions",
-                "/v1/images/generations",
+                "/v2/health/live",
+                "/v2/health/ready",
+                "/v3/models",
+                "/v3/models/{model}",
+                "/v3/chat/completions",
+                "/v3/completions",
             },
-            note = "Chat and text endpoints can use the loaded text model. Image generation is not wired yet.",
+            note = "Chat and text endpoints stream live output from the loaded model. Chat accepts image attachments when a vision model is loaded. Image generation is not wired yet.",
         };
     }
 
-    private object BuildV1ModelsPayload()
+    private object BuildModelsPayload()
     {
         LocalModelApiSnapshot snapshot = _snapshotProvider();
         return new
@@ -980,207 +946,15 @@ internal sealed class LocalModelApiServer : IDisposable
         };
     }
 
-    private static async Task<HttpRequestReadResult> ReadHttpRequestAsync(
-        NetworkStream stream,
-        CancellationToken cancellationToken)
-    {
-        List<byte> headerBytes = new();
-        byte[] oneByte = new byte[1];
-        int delimiterState = 0;
-
-        while (headerBytes.Count <= MaxHeaderSizeBytes)
-        {
-            int read = await stream.ReadAsync(oneByte.AsMemory(0, 1), cancellationToken);
-            if (read == 0)
-            {
-                return HttpRequestReadResult.Error(
-                    400,
-                    "The HTTP request ended before its headers were complete.",
-                    "invalid_request_error");
-            }
-
-            byte value = oneByte[0];
-            headerBytes.Add(value);
-            delimiterState = (delimiterState, value) switch
-            {
-                (0, (byte)'\r') => 1,
-                (1, (byte)'\n') => 2,
-                (2, (byte)'\r') => 3,
-                (3, (byte)'\n') => 4,
-                (_, (byte)'\r') => 1,
-                _ => 0,
-            };
-
-            if (delimiterState == 4)
-            {
-                break;
-            }
-        }
-
-        if (delimiterState != 4)
-        {
-            return HttpRequestReadResult.Error(
-                431,
-                "Request headers exceed maximum allowed size (64 KB).",
-                "request_header_fields_too_large");
-        }
-
-        string headerText = Encoding.ASCII.GetString(headerBytes.ToArray());
-        string[] lines = headerText.Split(new[] { "\r\n" }, StringSplitOptions.None);
-        if (lines.Length == 0 || string.IsNullOrWhiteSpace(lines[0]))
-        {
-            return HttpRequestReadResult.Error(
-                400,
-                "Missing HTTP request line.",
-                "invalid_request_error");
-        }
-
-        string[] requestParts = lines[0].Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
-        if (requestParts.Length < 2)
-        {
-            return HttpRequestReadResult.Error(
-                400,
-                "Malformed HTTP request line.",
-                "invalid_request_error");
-        }
-
-        Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
-        for (int index = 1; index < lines.Length; index++)
-        {
-            string line = lines[index];
-            if (line.Length == 0)
-            {
-                break;
-            }
-
-            int separator = line.IndexOf(':', StringComparison.Ordinal);
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            headers[line[..separator].Trim()] = line[(separator + 1)..].Trim();
-        }
-
-        if (!TryGetContentLength(headers, out int contentLength, out string lengthError))
-        {
-            return HttpRequestReadResult.Error(
-                400,
-                lengthError,
-                "invalid_request_error");
-        }
-
-        if (contentLength > MaxRequestBodyBytes)
-        {
-            return HttpRequestReadResult.Error(
-                413,
-                "Request body is too large. Keep local server requests under 4 MB.",
-                "request_too_large");
-        }
-
-        byte[] bodyBytes = new byte[contentLength];
-        int bodyOffset = 0;
-        while (bodyOffset < contentLength)
-        {
-            int read = await stream.ReadAsync(
-                bodyBytes.AsMemory(bodyOffset, contentLength - bodyOffset),
-                cancellationToken);
-            if (read == 0)
-            {
-                return HttpRequestReadResult.Error(
-                    400,
-                    "The HTTP request body ended before Content-Length bytes were received.",
-                    "invalid_request_error");
-            }
-
-            bodyOffset += read;
-        }
-
-        return HttpRequestReadResult.Ok(new HttpRequestData(
-            requestParts[0].ToUpperInvariant(),
-            NormalizeRequestPath(requestParts[1]),
-            Encoding.UTF8.GetString(bodyBytes)));
-    }
-
-    private static bool TryGetContentLength(
-        IReadOnlyDictionary<string, string> headers,
-        out int contentLength,
-        out string error)
-    {
-        contentLength = 0;
-        error = string.Empty;
-        if (!headers.TryGetValue("Content-Length", out string? value)
-            || string.IsNullOrWhiteSpace(value))
-        {
-            return true;
-        }
-
-        if (!int.TryParse(
-                value,
-                NumberStyles.Integer,
-                CultureInfo.InvariantCulture,
-                out contentLength)
-            || contentLength < 0)
-        {
-            error = "Content-Length must be a non-negative integer.";
-            return false;
-        }
-
-        return true;
-    }
-
-    private static string NormalizeRequestPath(string target)
-    {
-        string path = target;
-        if (Uri.TryCreate(target, UriKind.Absolute, out Uri? absolute))
-        {
-            path = absolute.AbsolutePath;
-        }
-
-        int queryIndex = path.IndexOf('?', StringComparison.Ordinal);
-        if (queryIndex >= 0)
-        {
-            path = path[..queryIndex];
-        }
-
-        return string.IsNullOrWhiteSpace(path)
-            ? "/"
-            : Uri.UnescapeDataString(path);
-    }
-
-    private static async Task WriteGeneratedJsonAsync(
-        NetworkStream stream,
-        Func<object> payloadFactory,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await WriteJsonAsync(stream, 200, payloadFactory(), cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            await WriteOpenAiErrorAsync(
-                stream,
-                500,
-                $"The local server could not build the response: {ex.Message}",
-                "server_error",
-                cancellationToken);
-        }
-    }
-
     private static async Task WriteOpenAiErrorAsync(
-        NetworkStream stream,
+        HttpResponse response,
         int statusCode,
         string message,
         string type,
         CancellationToken cancellationToken)
     {
         await WriteJsonAsync(
-            stream,
+            response,
             statusCode,
             new
             {
@@ -1196,97 +970,28 @@ internal sealed class LocalModelApiServer : IDisposable
     }
 
     private static async Task WriteJsonAsync(
-        NetworkStream stream,
+        HttpResponse response,
         int statusCode,
         object payload,
         CancellationToken cancellationToken)
     {
         byte[] body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, JsonOptions));
         await WriteResponseAsync(
-            stream,
+            response,
             statusCode,
-            ReasonPhrase(statusCode),
             "application/json; charset=utf-8",
             body,
             cancellationToken);
     }
 
-    private static async Task WriteEventStreamAsync(
-        NetworkStream stream,
-        IReadOnlyList<object> payloads,
-        CancellationToken cancellationToken)
+    private static async Task WriteResponseAsync(HttpResponse response, int statusCode,
+        string contentType, byte[] body, CancellationToken cancellationToken)
     {
-        string headers =
-            "HTTP/1.1 200 OK\r\n" +
-            $"Date: {DateTimeOffset.UtcNow:R}\r\n" +
-            "Server: OpenVINO-Workbench-Local\r\n" +
-            "Content-Type: text/event-stream; charset=utf-8\r\n" +
-            "Cache-Control: no-cache\r\n" +
-            "Connection: close\r\n" +
-            "Access-Control-Allow-Origin: *\r\n" +
-            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-            "Access-Control-Allow-Headers: content-type, authorization, x-requested-with, openai-organization, openai-project\r\n" +
-            "\r\n";
-
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(headers), cancellationToken);
-        foreach (object payload in payloads)
-        {
-            string json = JsonSerializer.Serialize(payload, JsonOptions);
-            await stream.WriteAsync(
-                Encoding.UTF8.GetBytes($"data: {json}\n\n"),
-                cancellationToken);
-        }
-
-        await stream.WriteAsync(
-            Encoding.UTF8.GetBytes("data: [DONE]\n\n"),
-            cancellationToken);
+        response.StatusCode = statusCode;
+        response.ContentType = contentType;
+        response.ContentLength = body.Length;
+        if (body.Length > 0) await response.Body.WriteAsync(body, cancellationToken);
     }
-
-    private static async Task WriteResponseAsync(
-        NetworkStream stream,
-        int statusCode,
-        string reasonPhrase,
-        string contentType,
-        byte[] body,
-        CancellationToken cancellationToken)
-    {
-        string headers =
-            $"HTTP/1.1 {statusCode.ToString(CultureInfo.InvariantCulture)} {reasonPhrase}\r\n" +
-            $"Date: {DateTimeOffset.UtcNow:R}\r\n" +
-            "Server: OpenVINO-Workbench-Local\r\n" +
-            $"Content-Type: {contentType}\r\n" +
-            $"Content-Length: {body.Length.ToString(CultureInfo.InvariantCulture)}\r\n" +
-            "Connection: close\r\n" +
-            "Access-Control-Allow-Origin: *\r\n" +
-            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-            "Access-Control-Allow-Headers: content-type, authorization, x-requested-with, openai-organization, openai-project\r\n" +
-            "\r\n";
-
-        byte[] headerBytes = Encoding.ASCII.GetBytes(headers);
-        await stream.WriteAsync(headerBytes, cancellationToken);
-        if (body.Length > 0)
-        {
-            await stream.WriteAsync(body, cancellationToken);
-        }
-    }
-
-    private static string ReasonPhrase(int statusCode) => statusCode switch
-    {
-        200 => "OK",
-        204 => "No Content",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        413 => "Payload Too Large",
-        431 => "Request Header Fields Too Large",
-        500 => "Internal Server Error",
-        501 => "Not Implemented",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => "OK",
-    };
 
     public static string CreateDigest(string source, long sizeBytes, DateTimeOffset modifiedAtUtc)
     {
@@ -1295,36 +1000,6 @@ internal sealed class LocalModelApiServer : IDisposable
         return System.Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private sealed record HttpRequestData(string Method, string Path, string Body);
-
-    private sealed class HttpRequestReadResult
-    {
-        public bool Success { get; init; }
-        public HttpRequestData? Request { get; init; }
-        public int StatusCode { get; init; } = 400;
-        public string ErrorMessage { get; init; } = string.Empty;
-        public string ErrorType { get; init; } = "invalid_request_error";
-
-        public static HttpRequestReadResult Ok(HttpRequestData request)
-        {
-            return new HttpRequestReadResult
-            {
-                Success = true,
-                Request = request,
-            };
-        }
-
-        public static HttpRequestReadResult Error(int statusCode, string message, string type)
-        {
-            return new HttpRequestReadResult
-            {
-                Success = false,
-                StatusCode = statusCode,
-                ErrorMessage = message,
-                ErrorType = type,
-            };
-        }
-    }
 }
 
 internal sealed class LocalModelApiSnapshot
@@ -1363,9 +1038,14 @@ internal sealed class LocalModelApiTextRequest
     public LocalModelApiTextResponseKind ResponseKind { get; init; }
     public string Model { get; init; } = string.Empty;
     public string Prompt { get; init; } = string.Empty;
+    public IReadOnlyList<string> Messages { get; init; } = [];
+    public IReadOnlyList<string> ImageUrls { get; init; } = [];
     public int MaxTokens { get; init; } = 64;
     public double Temperature { get; init; }
     public bool Stream { get; init; }
+    public bool IncludeUsage { get; init; }
+    public ToolCalling ToolCalling { get; init; } = ToolCalling.Disabled;
+    internal Func<string, ValueTask>? OnTextChunk { get; set; }
     public string ResponseFormat { get; init; } = string.Empty;
     public bool EnableThinking { get; init; }
     public bool PreserveThinking { get; init; }
@@ -1381,12 +1061,20 @@ internal sealed class LocalModelApiTextResult
     public string ModelName { get; init; } = string.Empty;
     public long LoadMilliseconds { get; init; }
     public long GenerateMilliseconds { get; init; }
+    public ulong PromptTokens { get; init; }
+    public ulong CompletionTokens { get; init; }
+    public string FinishReason { get; init; } = "stop";
+    public IReadOnlyList<ModelToolCall> ToolCalls { get; init; } = [];
 
     public static LocalModelApiTextResult Ok(
         string text,
         string modelName,
         long loadMilliseconds,
-        long generateMilliseconds)
+        long generateMilliseconds,
+        ulong promptTokens = 0,
+        ulong completionTokens = 0,
+        string finishReason = "stop",
+        IReadOnlyList<ModelToolCall>? toolCalls = null)
     {
         return new LocalModelApiTextResult
         {
@@ -1395,6 +1083,10 @@ internal sealed class LocalModelApiTextResult
             ModelName = modelName,
             LoadMilliseconds = loadMilliseconds,
             GenerateMilliseconds = generateMilliseconds,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            FinishReason = finishReason,
+            ToolCalls = toolCalls ?? [],
         };
     }
 

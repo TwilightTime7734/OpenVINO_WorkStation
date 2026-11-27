@@ -1,0 +1,136 @@
+{
+  "OvmsExecutable": "C:\\Example\\OVMS\\ovms\\ovms.exe",
+  "PythonRuntimePath": "C:\\Example\\OVMS\\ovms\\python",
+  "ExportToolsPath": "C:\\Users\\ExampleUser\\AppData\\Local\\Python\\pythoncore-3.14-64\\Scripts",
+  "SourceFormat": "HF export",
+  "Task": "text_generation",
+  "PipelineType": "VLM",
+  "SourceModel": "Qwen/Qwen3.5-4B",
+  "GgufFilename": "",
+  "ModelRepositoryPath": "C:\\Example\\Models",
+  "WeightFormat": "int8",
+  "LogPath": "C:\\Example\\OpenVINO\\qwen35-4b-pull-global.log",
+  "OverwriteModels": true,
+  "DebugLogging": true,
+  "SourceFormats": [
+    "HF export",
+    "GGUF"
+  ],
+  "Tasks": [
+    "text_generation"
+  ],
+  "PipelineTypes": [
+    "VLM",
+    "LM"
+  ],
+  "SourceModels": [
+    "Qwen/Qwen3.5-4B",
+    "unsloth/Qwen3.6-27B-MTP-GGUF",
+    "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3.6-27B"
+  ],
+  "WeightFormats": [
+    "int8",
+    "int4",
+    "fp16",
+    "fp32"
+  ],
+  "Commands": [
+    {
+      "OvmsExecutable": "C:\\Example\\OVMS\\ovms\\ovms.exe",
+      "SourceFormat": "",
+      "Task": "text_generation",
+      "PipelineType": "LM",
+      "SourceModel": "Qwen/Qwen3-0.6B",
+      "GgufFilename": "",
+      "ModelRepositoryPath": "C:\\Example\\Models",
+      "WeightFormat": "int8",
+      "LogLevel": "DEBUG",
+      "LogPath": "C:\\Example\\OpenVINO\\qwen3-06b-pull.log",
+      "OverwriteModels": true
+    },
+    {
+      "OvmsExecutable": "C:\\Example\\OVMS\\ovms\\ovms.exe",
+      "SourceFormat": "",
+      "Task": "text_generation",
+      "PipelineType": "VLM",
+      "SourceModel": "Qwen/Qwen3.5-4B",
+      "GgufFilename": "",
+      "ModelRepositoryPath": "C:\\Example\\Models",
+      "WeightFormat": "int8",
+      "LogLevel": "DEBUG",
+      "LogPath": "C:\\Example\\OpenVINO\\qwen35-4b-pull-global.log",
+      "OverwriteModels": true
+    },
+    {
+      "OvmsExecutable": "C:\\Example\\OVMS\\ovms\\ovms.exe",
+      "SourceFormat": "",
+      "Task": "text_generation",
+      "PipelineType": "VLM",
+      "SourceModel": "Qwen/Qwen3.6-27B",
+      "GgufFilename": "",
+      "ModelRepositoryPath": "C:\\Example\\Models",
+      "WeightFormat": "int8",
+      "LogLevel": "DEBUG",
+      "LogPath": "C:\\Example\\OpenVINO\\qwen36-27b-pull-global.log",
+      "OverwriteModels": true
+    },
+    {
+      "OvmsExecutable": "",
+      "SourceFormat": "GGUF",
+      "Task": "text_generation",
+      "PipelineType": "",
+      "SourceModel": "unsloth/Qwen3.6-27B-MTP-GGUF",
+      "GgufFilename": "Qwen3.6-27B-UD-Q8_K_XL.gguf",
+      "ModelRepositoryPath": "C:\\Example\\Models",
+      "WeightFormat": "",
+      "LogLevel": "DEBUG",
+      "LogPath": "C:\\Example\\OpenVINO\\qwen36-27b-mtp-gguf-q8.log",
+      "OverwriteModels": true
+    }
+  ],
+  "Versions": [
+    {
+      "Name": "Python",
+      "ExpectedVersion": "3.14.6",
+      "Required": true,
+      "Strict": true
+    },
+    {
+      "Name": "transformers",
+      "ExpectedVersion": "5.2.0",
+      "Required": true,
+      "Strict": true
+    },
+    {
+      "Name": "optimum-intel",
+      "ExpectedVersion": "2.1.0.dev0",
+      "Required": true,
+      "Strict": true
+    },
+    {
+      "Name": "optimum",
+      "ExpectedVersion": "2.2.0",
+      "Required": true,
+      "Strict": true
+    },
+    {
+      "Name": "openvino",
+      "ExpectedVersion": "2026.2.1",
+      "Required": true,
+      "Strict": true
+    },
+    {
+      "Name": "huggingface-hub",
+      "ExpectedVersion": "1.21.0",
+      "Required": false,
+      "Strict": false
+    },
+    {
+      "Name": "accelerate",
+      "ExpectedVersion": "1.14.0",
+      "Required": false,
+      "Strict": false
+    }
+  ]
+}
