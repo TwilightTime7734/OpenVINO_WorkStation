@@ -31,17 +31,17 @@ This is the workstation's single-model chat server, not complete OVMS protocol c
 
 Run `dotnet run --project Checks/WorkstationChecks.csproj` for HTTP streaming, disconnects, protocol errors, image decoding, and existing workstation checks. The streaming fixture prevents generation from finishing until the client has read real text, so buffering regressions cannot pass merely by returning `[DONE]`.
 
-Append a model directory and device to also test native HTTP generation, multiple streaming chunks, token usage, and image recognition when the model supports vision:
+Append a model directory and device to also test native HTTP generation, multiple streaming chunks, token usage, and image recognition when the model supports vision. Replace the example path and device with your own:
 
 ```powershell
-dotnet run --project Checks/WorkstationChecks.csproj -- 'C:\Example\Models\OpenVINO_Qwen3-8B-int4-ov' 'GPU.0'
+dotnet run --project Checks/WorkstationChecks.csproj -- '<model-directory>' 'GPU.0'
 ```
 
 References: [OVMS clients and /v3 endpoints](https://docs.openvino.ai/2026/model-server/ovms_docs_clients_genai.html), [OVMS health endpoints](https://docs.openvino.ai/2026/model-server/ovms_docs_rest_api_kfs.html), [Open WebUI compatible connections](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/), [Open WebUI model capabilities](https://docs.openwebui.com/features/workspace/models/).
 
 ## Local model template repair
 
-On 2026-09-07, the user authorized repairing the native template error in the installed Qwen3.8 exports. The unsupported Jinja test `is undefined` was changed to its equivalent `is not defined` in sixteen files across these six runtime directories under `C:\Example\Models`:
+On 2026-09-07, the user authorized repairing the native template error in the installed Qwen3.8 exports. The unsupported Jinja test `is undefined` was changed to its equivalent `is not defined` in sixteen files across these six model directories:
 
 - `Qwen3.8-27B-obliterated-ov`
 - `Qwen3.8-27B-obliterated-int4-int8-20-80-ov`

@@ -16,6 +16,7 @@ _publish/
 # Local machine settings
 workbench.cfg
 model-root.txt
+ovms-settings.local.json
 
 # Local OpenVINO source/reference checkout
 Extras/

@@ -17,7 +17,7 @@ Chat tools are optional: enable **Let the model use tools**. Search requires a B
 - An OVMS installation for starting a server and using OVMS Pull. Set the OVMS executable and its Python runtime paths in the OVMS Pull tab. Hugging Face export also requires the compatible Python export tools checked by the app. Models and their hardware requirements vary.
 - Git LFS to obtain the repository's native runtime files. The build also supplies OpenVINO runtime packages through NuGet.
 
-The included `ovms-settings.json` contains example defaults and machine-specific paths. Review and adjust the paths and settings for your machine before using OVMS. Downloaded models and external tools are not included in the repository.
+The included `ovms-settings.json` supplies model presets but leaves installation-specific paths blank. Enter your paths in the OVMS Pull tab. To keep them between runs, copy `ovms-settings.json` to `ovms-settings.local.json` beside it and edit the copy; the app uses that file instead when present. For a published app, put the local file beside the executable. It is Git-ignored and is not included in publish output. Downloaded models and external tools are not included in the repository.
 
 Build from the project directory:
 

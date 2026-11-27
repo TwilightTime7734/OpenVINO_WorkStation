@@ -7,10 +7,10 @@ This file is the working source of truth for future Codex/ChatGPT sessions. Keep
 - This is a .NET 10 C# WinForms OpenVINO workbench with four tabs: Workstation, Chat, Downloads, and OVMS Pull.
 - 2026-11-25: Workstation now serves the selected model by starting `ovms.exe` (`Workstation/OvmsServer.cs`) with `--model_path --model_name --task --target_device --rest_port 8000 --port 9000`, bound to 127.0.0.1, using the OVMS program and Python folder from the OVMS Pull tab. Load Model waits until `/v1/config` reports the model AVAILABLE; Unload Model and closing the app stop that process. Connect checks a server started outside the app. The Chat tab (`Chat/`) streams `/v3/chat/completions` from whatever server is at the Server address. The in-app GenAI loader and Kestrel server are no longer wired to the UI because they also used port 8000. The machine currently reports one GPU, `GPU.0`; multi-GPU targets are sent to OVMS as `HETERO:...`.
 - The user requested KISS simplification, authorized removing obsolete code, and has their own backup. Do not create unnecessary backups.
-- The user supplied `D:/Example/Project/Form1.cs` as a reference for a small form. `Form1.cs` is now about 150 lines of startup, named handlers, output, progress, and shutdown. Keep feature logic in the tab classes and runtime services. See `CODE_MAP.md`.
+- `Form1.cs` is now about 150 lines of startup, named handlers, output, progress, and shutdown. Keep feature logic in the tab classes and runtime services. See `CODE_MAP.md`.
 - `ModelSession` owns the loaded model and serializes loading, server generation, and disposal. The model folder and target controls are the selection; changing them takes effect on the next Load Model action. `ChatModel` owns the cached GenAI pipeline.
 - Downloads share one file-transfer routine. Native OpenVINO models are read directly by OpenVINO Core before marking them loaded.
-- OVMS defaults, four model presets, and expected package versions live in `ovms-settings.json`; runtime code does not parse this document.
+- OVMS defaults, four model presets, and expected package versions live in `ovms-settings.json`; an ignored `ovms-settings.local.json` can override them for a particular machine.
 - The local API uses ASP.NET Core Kestrel, binds only to loopback, and exposes only the model loaded on Workstation. Requests never scan folders or switch models automatically.
 - The local API exposes model listing/retrieval, chat completions, and text completions under both OVMS-style `/v3` and existing `/v1` paths. Native generation callbacks now stream immediately as flushed SSE events. Disconnects cancel generation; optional usage chunks report native token counts. LLM chat retains message roles. See `LocalServer/README.md` for Open WebUI setup and the remaining OVMS feature limitations.
 - Vision chat accepts image attachments as base64 data URLs or HTTP(S) URLs. `Runtime/ModelImages.cs` decodes them to RGB tensors and owns their lifetime through generation. Text-only models reject image input. VLM uses the supported C Generate entry point with a role-labeled transcript and ordered image markers.
@@ -119,7 +119,7 @@ This project is a C# WinForms OpenVINO workstation/workbench. It is not meant to
 
 The normal Workstation, Downloads, OVMS Pull, and local-server workflows should feel self-contained to the user. Runtime dependencies should be bundled deliberately when practical.
 
-OVMS `--pull` export is intentionally different: it depends on the user's installed `C:\Example\OpenVINO\ovms.exe`, the OVMS bundled Python DLL folder, and a known-good global Python export stack. Do not pretend this path is fully standalone. The app should check that stack, explain mismatches plainly, and recommend exact repair commands before starting a non-GGUF pull.
+OVMS `--pull` export is intentionally different: it depends on the user's installed OVMS executable, the OVMS bundled Python DLL folder, and a compatible global Python export stack. Do not pretend this path is fully standalone. The app should check that stack, explain mismatches plainly, and recommend exact repair commands before starting a non-GGUF pull.
 
 ## Hardware and architecture assumptions
 
@@ -147,15 +147,7 @@ OVMS `--pull` export is intentionally different: it depends on the user's instal
 
 ### Important OVMS paths
 
-```text
-OVMS installation:      C:\Example\OpenVINO
-OVMS executable:        C:\Example\OpenVINO\ovms.exe
-Bundled Python runtime: C:\Example\OpenVINO\python\python.exe
-Bundled Python DLL:     C:\Example\OpenVINO\python\python312.dll
-Model repository:       C:\Example\Models
-Global Python:          C:\Users\ExampleUser\AppData\Local\Python\pythoncore-3.14-64\python.exe
-Global optimum-cli:     C:\Users\ExampleUser\AppData\Local\Python\pythoncore-3.14-64\Scripts\optimum-cli.exe
-```
+Configure the OVMS executable, bundled Python directory, global export tools directory, and model repository for the local machine. The paths in the examples below are illustrative and must be replaced with actual installation paths.
 
 Confirmed OVMS build:
 
@@ -170,7 +162,7 @@ Bazel build flags: --config=win_mp_on_py_on
 
 Do not confuse these:
 
-- `ovms.exe` needs its bundled Python 3.12 DLL at startup. Before starting OVMS in a fresh CMD process, prepend `C:\Example\OpenVINO\python` to `PATH`.
+- `ovms.exe` needs its bundled Python 3.12 DLL at startup. Before starting OVMS in a fresh CMD process, prepend its bundled Python directory to `PATH`.
 - During `ovms.exe --pull`, OVMS launches the `optimum-cli.exe` found on `PATH`.
 - The successful Qwen conversions used the global Python 3.14 installation and its global `optimum-cli.exe`.
 - This is intentional: OVMS loads `python312.dll`, while the export subprocess runs through global Python 3.14.
@@ -187,10 +179,10 @@ huggingface-hub    1.21.0 (query live before treating Hub as exact)
 accelerate         1.14.0
 ```
 
-Critical Optimum Intel repair used during troubleshooting:
+Critical Optimum Intel repair used during troubleshooting (run with the Python installation used for export):
 
 ```cmd
-"C:\Users\ExampleUser\AppData\Local\Python\pythoncore-3.14-64\python.exe" -m pip install --upgrade --force-reinstall --no-deps "https://github.com/huggingface/optimum-intel/archive/refs/heads/main.zip"
+python -m pip install --upgrade --force-reinstall --no-deps "https://github.com/huggingface/optimum-intel/archive/refs/heads/main.zip"
 ```
 
 Do not casually upgrade or downgrade this environment. First capture versions with:
@@ -203,6 +195,8 @@ python -m pip show transformers optimum-intel optimum openvino openvino-genai hu
 ```
 
 ### Confirmed OVMS conversions
+
+The paths below are examples; replace them with paths on your machine.
 
 Qwen3-0.6B language model:
 
@@ -262,15 +256,15 @@ Although Hugging Face may label these models as image-text-to-text, the working 
 - The root cause was a Transformers / Optimum Intel API mismatch.
 - The working fix was `transformers 5.2.0` plus `optimum-intel 2.1.0.dev0` from main.
 - `Qwen/Qwen3.6-27B-FP8` was the wrong path for the INT8 conversion test; do not return to it unless supporting an already-quantized FP8 checkpoint is an explicit goal.
-- The experimental `C:\Example\OpenVINO\venvs\qwen35` environment was not the fix and must not be recreated as the solution.
-- Do not copy a random `python312.dll` beside `ovms.exe`; the OVMS distribution already includes the correct embedded Python runtime under `C:\Example\OpenVINO\python`.
+- An experimental separate `qwen35` Python environment was not the fix and must not be recreated as the solution.
+- Do not copy a random `python312.dll` beside `ovms.exe`; the OVMS distribution already includes the correct embedded Python runtime.
 
 ### Current OVMS Pull behavior
 
-- OVMS defaults and presets are loaded from `ovms-settings.json`, which is copied into build and publish output.
+- OVMS defaults and presets are loaded from `ovms-settings.local.json` if present, otherwise `ovms-settings.json`. Only the shared settings are copied into build and publish output.
 - `WorkStationC#.csproj` no longer packages `Runtime\optimum-exporter`.
 - OVMS Pull opens a real `cmd.exe` window and runs a generated `.cmd` script.
-- The generated script prepends `C:\Example\OpenVINO\python` so OVMS finds its Python 3.12 DLL.
+- The generated script prepends the configured bundled Python directory so OVMS finds its Python 3.12 DLL.
 - For non-GGUF Hugging Face export pulls, the generated script also prepends the global Python `Scripts` folder and parent folder so OVMS finds the known-good `optimum-cli.exe` stack.
 - The OVMS Pull tab has a `Check Stack` button.
 - `Start Pull` runs the stack check before opening the conversion CMD window for non-GGUF exports.

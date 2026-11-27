@@ -52,10 +52,10 @@ The app checks next to the executable first, then the project directory. A local
 
 ## Model checks
 
-To also check a real text model and HTTP chat:
+To also check a real text model and HTTP chat, replace the example model path and device with your own:
 
 ```powershell
-dotnet run --project 'Checks/WorkstationChecks.csproj' -- 'C:\Example\Models\OpenVINO_Qwen3-8B-int4-ov' 'GPU.0'
+dotnet run --project 'Checks/WorkstationChecks.csproj' -- '<model-directory>' 'GPU.0'
 ```
 
 ## Behavior

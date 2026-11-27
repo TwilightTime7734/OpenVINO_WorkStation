@@ -20,7 +20,7 @@ internal static class OvmsPull
         public string GgufFilename { get; set; } = string.Empty;
         public string ModelRepositoryPath { get; set; } = string.Empty;
         public string WeightFormat { get; set; } = "int8";
-        public string LogPath { get; set; } = "C:\\Example\\OpenVINO\\qwen35-4b-pull-global.log";
+        public string LogPath { get; set; } = string.Empty;
         public bool OverwriteModels { get; set; } = true;
         public bool DebugLogging { get; set; } = true;
         public List<string> SourceFormats { get; set; } = new();
@@ -99,7 +99,9 @@ internal static class OvmsPull
 
     internal static OvmsPullDefaults LoadSettings()
     {
-        string path = Path.Combine(GetProjectDirectory(), "ovms-settings.json");
+        string directory = GetProjectDirectory();
+        string localPath = Path.Combine(directory, "ovms-settings.local.json");
+        string path = File.Exists(localPath) ? localPath : Path.Combine(directory, "ovms-settings.json");
         return System.Text.Json.JsonSerializer.Deserialize<OvmsPullDefaults>(File.ReadAllText(path))
             ?? throw new InvalidDataException("OVMS settings are empty.");
     }
@@ -158,7 +160,7 @@ internal static class OvmsPull
                 && !string.IsNullOrWhiteSpace(openvinoExpectation.ExpectedVersion)
                 && !CombineCommandOutput(ovmsVersion).Contains(openvinoExpectation.ExpectedVersion, StringComparison.OrdinalIgnoreCase))
             {
-                AddStackWarning(result, $"OVMS version output did not include expected OpenVINO version {openvinoExpectation.ExpectedVersion}. Confirm this OVMS install matches the working C:\\Example\\OpenVINO package.");
+                AddStackWarning(result, $"OVMS version output did not include expected OpenVINO version {openvinoExpectation.ExpectedVersion}. Confirm your OVMS installation is compatible with the configured export stack.");
             }
         }
 

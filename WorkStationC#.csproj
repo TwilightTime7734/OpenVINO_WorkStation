@@ -47,6 +47,7 @@
 
   <ItemGroup>
     <None Update="ovms-settings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ovms-settings.local.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <None Update="SearchApiKeys.txt" Condition="Exists('SearchApiKeys.txt')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
